@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import Search from "../ui/Search";
+import { useAuth } from "../../store/AuthContext";
+import ProfileDropdown from "./ProfileDropdown";
 
-const Navbar = ({ navigate }) => { // <--- receive navigate from Router
+const Navbar = ({ navigate, setSearchQuery }) => { // <--- receive navigate and setSearchQuery from Router
+  const { user } = useAuth();
   const [hidden, setHidden] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const lastScrollY = useRef(0);
+  const profileRef = useRef(null);
 
   // --- scroll hide/show ---
   useEffect(() => {
@@ -25,6 +30,11 @@ const Navbar = ({ navigate }) => { // <--- receive navigate from Router
     { name: "Catalogue", path: "/catalogue" },
     { name: "About", path: "/about" },
   ];
+
+  // Add admin link if user is admin
+  if (user?.isAdmin) {
+    navLinks.push({ name: "Admin", path: "/admin" });
+  }
 
   const handleLogoClick = () => {
     if (window.location.pathname === "/") {
@@ -58,11 +68,11 @@ const Navbar = ({ navigate }) => { // <--- receive navigate from Router
           </a>
         ))}
 
-        {/* Pass navigate and products to Search */}
-        <Search navigate={navigate} products={window.products || []} />
+        {/* Pass navigate and setSearchQuery to Search */}
+        <Search navigate={navigate} setSearchQuery={setSearchQuery} />
 
         {/* Cart SVG */}
-        <div style={styles.icon}>
+        <div style={styles.icon} onClick={() => navigate("/cart")}>
           <svg
             width="24"
             height="24"
@@ -94,7 +104,29 @@ const Navbar = ({ navigate }) => { // <--- receive navigate from Router
         </div>
 
         {/* Profile */}
-        <div style={styles.profile} />
+        {user ? (
+          <div style={styles.profileContainer} ref={profileRef}>
+            <img
+              src={user.photo}
+              alt="Profile"
+              style={styles.profileImage}
+              onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+            />
+            {showProfileDropdown && (
+              <ProfileDropdown
+                user={user}
+                onClose={() => setShowProfileDropdown(false)}
+                navigate={navigate}
+              />
+            )}
+          </div>
+        ) : (
+          <div
+            style={styles.profile}
+            onClick={() => navigate("/login")}
+            title="Log in"
+          />
+        )}
       </nav>
     </header>
   );
@@ -121,7 +153,9 @@ const styles = {
   right: { display: "flex", alignItems: "center", gap: "32px" },
   link: { fontSize: "1rem", fontWeight: 500, letterSpacing: "-0.02em", color: "#fff", textDecoration: "none", cursor: "pointer" },
   icon: { height: "24px", width: "24px", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
-  profile: { height: "24px", width: "24px", borderRadius: "50%", background: "rgba(255,255,255,0.35)", cursor: "pointer" },
+  profile: { height: "24px", width: "24px", background: "rgba(255,255,255,0.35)", cursor: "pointer", borderRadius: "50%" },
+  profileContainer: { position: "relative", height: "24px", width: "24px", cursor: "pointer" },
+  profileImage: { height: "24px", width: "24px", objectFit: "cover", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%" },
 };
 
 export default Navbar;

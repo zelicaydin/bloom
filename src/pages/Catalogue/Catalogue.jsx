@@ -1,9 +1,10 @@
 import { useState } from "react";
 import SortBar from "./SortBar";
 import ProductGrid from "../../components/product/ProductGrid";
-import products from "../../data/products";
+import { useProducts } from "../../store/ProductsContext";
 
 const Catalogue = ({ navigate, searchQuery }) => {
+  const { products } = useProducts();
   const [filteredProducts, setFilteredProducts] = useState(products);
 
   return (

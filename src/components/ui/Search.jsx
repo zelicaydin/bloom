@@ -1,17 +1,23 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
-const Search = ({ navigate, onSearch }) => {
+const Search = ({ navigate, setSearchQuery }) => {
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    // Update search query in Router whenever query changes
+    if (setSearchQuery) {
+      setSearchQuery(query);
+    }
+  }, [query, setSearchQuery]);
 
   const handleChange = (e) => {
     const value = e.target.value;
     setQuery(value);
 
     // Navigate to catalogue if not there
-    if (window.location.pathname !== "/catalogue") navigate("/catalogue");
-
-    // Send query up to Router
-    onSearch(value);
+    if (window.location.pathname !== "/catalogue") {
+      navigate("/catalogue");
+    }
   };
 
   return (

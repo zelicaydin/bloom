@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import products from "../../data/products";
+import { useProducts } from "../../store/ProductsContext";
 import ProductFilters from "../../components/product/ProductFilters";
 
 const SortBar = ({ children, searchQuery = "" }) => {
+  const { products } = useProducts();
   const [filters, setFilters] = useState({
     type: null,
     brand: null,
@@ -48,7 +49,7 @@ const SortBar = ({ children, searchQuery = "" }) => {
     }
 
     return list;
-  }, [filters, sortBy, searchQuery]);
+  }, [filters, sortBy, searchQuery, products]);
 
   return (
     <>
