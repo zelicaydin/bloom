@@ -12,7 +12,9 @@
     "test-supabase": "node scripts/test-supabase.js",
     "test-product-add": "node scripts/test-product-add.js",
     "fix-rls": "node scripts/fix-rls-policies.js",
-    "migrate-to-supabase": "node scripts/migrate-backend-to-supabase.js"
+    "migrate-to-supabase": "node scripts/migrate-backend-to-supabase.js",
+    "upload-videos": "node scripts/upload-videos-to-supabase.js",
+    "upload-videos-cloudinary": "node scripts/upload-videos-to-cloudinary.js"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

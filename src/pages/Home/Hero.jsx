@@ -1,9 +1,12 @@
 const Hero = () => {
+  // Use environment variable for video URL, fallback to local file
+  const heroVideoUrl = import.meta.env.VITE_HERO_VIDEO_URL || '/hero.mp4';
+  
   return (
     <section style={styles.hero}>
       <video
         style={styles.video}
-        src="/hero.mp4" // Vite serves from public automatically
+        src={heroVideoUrl}
         autoPlay
         loop
         muted
