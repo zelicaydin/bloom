@@ -9,6 +9,7 @@ import Cart from '../pages/Cart/Cart';
 import Checkout from '../pages/Checkout/Checkout';
 import Login from '../pages/Auth/Login';
 import SignUp from '../pages/Auth/SignUp';
+import ForgotPassword from '../pages/Auth/ForgotPassword';
 import Admin from '../pages/Admin/Admin';
 import EditProfile from '../pages/Profile/EditProfile';
 import Navbar from '../components/layout/Navbar';
@@ -59,6 +60,7 @@ const Router = () => {
       return <PurchaseHistory key={path} navigate={navigate} />;
     if (path === '/login') return <Login key={path} navigate={navigate} />;
     if (path === '/signup') return <SignUp key={path} navigate={navigate} />;
+    if (path === '/forgot-password') return <ForgotPassword key={path} navigate={navigate} />;
     if (path === '/admin') return <Admin key={path} navigate={navigate} />;
     if (pathname === '/profile/edit') return <EditProfile key={path} navigate={navigate} />;
     // Match /product/:id

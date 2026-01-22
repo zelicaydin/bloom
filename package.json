@@ -7,10 +7,16 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed-data": "node scripts/seed-data.js",
+    "test-supabase": "node scripts/test-supabase.js",
+    "test-product-add": "node scripts/test-product-add.js",
+    "fix-rls": "node scripts/fix-rls-policies.js",
+    "migrate-to-supabase": "node scripts/migrate-backend-to-supabase.js"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
+    "@supabase/supabase-js": "^2.91.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -19,6 +25,7 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "dotenv": "^16.6.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

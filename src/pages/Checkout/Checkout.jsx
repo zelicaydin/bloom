@@ -10,7 +10,7 @@ import {
   formatCardNumber,
   formatExpiry,
 } from '../../utils/validation';
-import { validateCoupon, useCoupon } from '../../services/database';
+import { validateCoupon, useCoupon, addPurchase } from '../../services/database';
 
 const Checkout = ({ navigate }) => {
   const { user, updateCardInfo } = useAuth();
@@ -263,22 +263,8 @@ const Checkout = ({ navigate }) => {
           : null,
       };
 
-      // Save to purchase history
-      const purchaseHistoryKey = `bloom_purchase_history_${user.id}`;
-      const existingHistory = localStorage.getItem(purchaseHistoryKey);
-      let purchaseHistory = [];
-      
-      if (existingHistory) {
-        try {
-          purchaseHistory = JSON.parse(existingHistory);
-        } catch (e) {
-          console.error('Error parsing purchase history:', e);
-          purchaseHistory = [];
-        }
-      }
-
-      purchaseHistory.push(order);
-      localStorage.setItem(purchaseHistoryKey, JSON.stringify(purchaseHistory));
+      // Save to purchase history (using backend API if available)
+      await addPurchase(user.id, order);
 
       // Clear cart
       clearCart();

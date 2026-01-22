@@ -2,7 +2,6 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import defaultProducts from '../data/products';
 import {
   getProducts,
-  saveProducts,
   addProduct as dbAddProduct,
   updateProduct as dbUpdateProduct,
   deleteProduct as dbDeleteProduct,
@@ -28,59 +27,50 @@ const getProductPopularity = (productId) => {
 export const ProductsProvider = ({ children }) => {
   const [products, setProducts] = useState([]);
 
-  // Load products from localStorage
+  // Load products from backend (or localStorage fallback) - same pattern as users
   useEffect(() => {
     const loadProducts = async () => {
-      let loadedProducts = await getProducts();
+      console.log('📦 Loading products from backend...');
+      const loadedProducts = await getProducts();
+      console.log('✅ Loaded products from backend:', loadedProducts?.length || 0);
 
-      // If no products found, use defaults
+      // If no products found, use defaults and save them to backend
       if (!loadedProducts || loadedProducts.length === 0) {
-        loadedProducts = [...defaultProducts];
-        await saveProducts(loadedProducts);
-      } else {
-        // Merge default product data (like images) with existing products
-        // This ensures existing products get new fields from defaults
-        const defaultProductsMap = new Map(
-          defaultProducts.map((p) => [p.id, p])
-        );
-        loadedProducts = loadedProducts.map((product) => {
-          const defaultProduct = defaultProductsMap.get(product.id);
-          if (defaultProduct) {
-            // Merge default product data (especially image) with existing product
-            return {
-              ...defaultProduct,
-              ...product, // Existing product data takes precedence
-              // But ensure image is set from default if missing
-              image: product.image || defaultProduct.image,
-            };
+        console.log('📦 No products found, initializing defaults');
+        // Save defaults to backend one by one (same pattern as users)
+        for (const product of defaultProducts) {
+          try {
+            await dbAddProduct(product);
+            console.log('✅ Saved default product to backend:', product.id);
+          } catch (error) {
+            console.warn('⚠️ Failed to save default product:', product.id, error);
           }
-          return product;
-        });
-        // Save merged products back to localStorage
-        await saveProducts(loadedProducts);
+        }
+        // Reload products after saving defaults
+        const reloadedProducts = await getProducts();
+        const productsWithPopularity = (reloadedProducts || []).map((product) => ({
+          ...product,
+          popularity: getProductPopularity(product.id),
+        }));
+        setProducts(productsWithPopularity);
+        console.log('✅ Products initialized and loaded:', productsWithPopularity.length);
+      } else {
+        // Products exist - just add popularity data
+        const productsWithPopularity = loadedProducts.map((product) => ({
+          ...product,
+          popularity: getProductPopularity(product.id),
+        }));
+        setProducts(productsWithPopularity);
+        console.log('✅ Products loaded into state:', productsWithPopularity.length);
       }
-
-      // Merge popularity data from tracking
-      const productsWithPopularity = loadedProducts.map((product) => ({
-        ...product,
-        popularity: getProductPopularity(product.id),
-      }));
-
-      setProducts(productsWithPopularity);
     };
 
     loadProducts();
   }, []);
 
-  // Save products to database whenever they change (but don't save popularity, it's tracked separately)
-  useEffect(() => {
-    if (products.length > 0) {
-      const saveProductsAsync = async () => {
-        await saveProducts(products);
-      };
-      saveProductsAsync();
-    }
-  }, [products]);
+  // Don't auto-save products on every change - this causes issues and is inefficient
+  // Products are saved individually when added/updated/deleted
+  // This useEffect was causing products to not persist properly across browsers
 
   // Update products with latest popularity when component mounts or when popularity data might have changed
   useEffect(() => {
@@ -119,19 +109,21 @@ export const ProductsProvider = ({ children }) => {
   }, []);
 
   const addProduct = async (product) => {
-    const newProduct = {
+    // Don't generate ID here - let the backend generate sequential ID
+    const productToAdd = {
       ...product,
-      id: Date.now().toString(),
+      // Remove id if it exists, let backend generate it
       createdAt: new Date().toISOString().split('T')[0],
       popularity: 0, // New products start with 0 popularity
     };
+    delete productToAdd.id; // Ensure no ID is sent, backend will generate sequential ID
 
-    // Save to database
-    await dbAddProduct(newProduct);
+    // Save to database (backend will generate sequential ID)
+    const createdProduct = await dbAddProduct(productToAdd);
 
-    // Update local state
-    setProducts((prev) => [...prev, newProduct]);
-    return newProduct;
+    // Update local state with the product returned from backend (which has the correct ID)
+    setProducts((prev) => [...prev, createdProduct]);
+    return createdProduct;
   };
 
   const updateProduct = async (productId, updates) => {

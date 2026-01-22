@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { useReviews } from '../../store/ReviewsContext';
+import { getPurchases } from '../../services/database';
 import ReviewModal from '../../components/ui/ReviewModal';
 
 const PurchaseHistory = ({ navigate }) => {
@@ -16,19 +17,15 @@ const PurchaseHistory = ({ navigate }) => {
       return;
     }
 
-    const loadPurchaseHistory = () => {
-      const key = `bloom_purchase_history_${user.id}`;
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        try {
-          const history = JSON.parse(stored);
-          // Sort by date, newest first
-          history.sort((a, b) => new Date(b.date) - new Date(a.date));
-          setPurchaseHistory(history);
-        } catch (e) {
-          console.error('Error parsing purchase history:', e);
-          setPurchaseHistory([]);
-        }
+    const loadPurchaseHistory = async () => {
+      try {
+        const history = await getPurchases(user.id);
+        // Sort by date, newest first
+        history.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+        setPurchaseHistory(history);
+      } catch (e) {
+        console.error('Error loading purchase history:', e);
+        setPurchaseHistory([]);
       }
     };
 
