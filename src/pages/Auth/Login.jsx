@@ -53,7 +53,14 @@ const Login = ({ navigate }) => {
       if (result.success) {
         setShowRememberModal(true);
       } else {
-        setSubmitError(result.error || "Login failed");
+        // Show clear error message, especially for unverified emails
+        if (result.needsVerification) {
+          setSubmitError(
+            "Please verify your email address before logging in. Check your email for the verification code, or sign up again to receive a new code."
+          );
+        } else {
+          setSubmitError(result.error || "Login failed");
+        }
       }
     } catch (error) {
       setSubmitError("An error occurred. Please try again.");

@@ -7,6 +7,11 @@ import {
   updateUser as dbUpdateUser,
   deleteUser as dbDeleteUser,
 } from '../services/database';
+import {
+  generateVerificationCode,
+  createVerificationCodeExpiry,
+  isVerificationCodeExpired,
+} from '../utils/verification';
 
 const AuthContext = createContext(null);
 
@@ -30,8 +35,22 @@ export const AuthProvider = ({ children }) => {
       // Get all existing users from database
       const users = await getUsersLocal();
 
+      // Auto-verify existing users (backward compatibility)
+      let usersUpdated = false;
+      const updatedUsers = users.map((u) => {
+        if (u.emailVerified === undefined) {
+          usersUpdated = true;
+          return { ...u, emailVerified: true };
+        }
+        return u;
+      });
+
+      if (usersUpdated) {
+        await saveUsersLocal(updatedUsers);
+      }
+
       // Check if admin exists and has correct password hash
-      const existingAdmin = users.find((u) => u.email === 'admin@bloom.com');
+      const existingAdmin = updatedUsers.find((u) => u.email === 'admin@bloom.com');
 
       const adminPhoto =
         'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzQ0NDQ0NCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjQiIGZpbGw9IiNmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5BPC90ZXh0Pjwvc3ZnPg==';
@@ -42,7 +61,7 @@ export const AuthProvider = ({ children }) => {
       // Only update admin if it doesn't exist or needs password update
       if (!existingAdmin || existingAdmin.password !== adminPassword) {
         // Remove any existing admin accounts
-        const filteredUsers = users.filter(
+        const filteredUsers = updatedUsers.filter(
           (u) => u.email !== 'admin@bloom.com'
         );
 
@@ -57,13 +76,14 @@ export const AuthProvider = ({ children }) => {
           cardInfo: null,
           createdAt: existingAdmin?.createdAt || new Date().toISOString(),
           isAdmin: true,
+          emailVerified: true, // Admin is always verified
         };
 
         filteredUsers.push(adminUser);
         await saveUsersLocal(filteredUsers);
-      } else {
+      } else if (usersUpdated) {
         // Admin exists and is correct, just ensure all users are saved (preserve existing users)
-        await saveUsersLocal(users);
+        await saveUsersLocal(updatedUsers);
       }
 
       const storedUser = localStorage.getItem('bloom_user');
@@ -112,6 +132,10 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: 'Email already registered' };
     }
 
+    // Generate verification code
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpiry = createVerificationCodeExpiry();
+
     // Create new user
     const newUser = {
       id: Date.now().toString(),
@@ -122,18 +146,20 @@ export const AuthProvider = ({ children }) => {
       photo,
       cardInfo,
       createdAt: new Date().toISOString(),
+      emailVerified: false,
+      verificationCode,
+      verificationCodeExpiry,
     };
 
     // Save to database
     await dbAddUser(newUser);
 
-    // Auto-login after signup
-    const userData = { ...newUser };
-    delete userData.password; // Don't store password in user state
-    setUser(userData);
-    localStorage.setItem('bloom_user', JSON.stringify(userData));
-
-    return { success: true };
+    // Return success with verification code (don't auto-login)
+    return { 
+      success: true, 
+      verificationCode, // Return code to display to user
+      userId: newUser.id 
+    };
   };
 
   const login = async (email, password) => {
@@ -149,9 +175,20 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: 'Incorrect password' };
     }
 
+    // Check if email is verified
+    if (!user.emailVerified) {
+      return { 
+        success: false, 
+        error: 'Please verify your email address before logging in. Check your email for the verification code.',
+        needsVerification: true 
+      };
+    }
+
     // Login successful
     const userData = { ...user };
     delete userData.password; // Don't store password in user state
+    delete userData.verificationCode; // Don't store verification code in user state
+    delete userData.verificationCodeExpiry; // Don't store expiry in user state
     setUser(userData);
     localStorage.setItem('bloom_user', JSON.stringify(userData));
 
@@ -226,6 +263,74 @@ export const AuthProvider = ({ children }) => {
     return { success: true };
   };
 
+  const verifyEmail = async (userId, code) => {
+    const users = await getUsersLocal();
+    const dbUser = users.find((u) => u.id === userId);
+
+    if (!dbUser) {
+      return { success: false, error: 'User not found' };
+    }
+
+    // Check if code matches
+    if (dbUser.verificationCode !== code) {
+      return { success: false, error: 'Invalid verification code' };
+    }
+
+    // Check if code is expired
+    if (isVerificationCodeExpired(dbUser.verificationCodeExpiry)) {
+      return { success: false, error: 'Verification code has expired. Please request a new one.' };
+    }
+
+    // Verify email
+    await dbUpdateUser(userId, {
+      emailVerified: true,
+      verificationCode: null,
+      verificationCodeExpiry: null,
+    });
+
+    // Get updated user from database
+    const updatedUsers = await getUsersLocal();
+    const updatedDbUser = updatedUsers.find((u) => u.id === userId);
+    if (updatedDbUser) {
+      const userData = { ...updatedDbUser };
+      delete userData.password;
+      delete userData.verificationCode;
+      delete userData.verificationCodeExpiry;
+      // Update state if this is the current user
+      if (user && user.id === userId) {
+        setUser(userData);
+        localStorage.setItem('bloom_user', JSON.stringify(userData));
+      }
+    }
+
+    return { success: true };
+  };
+
+  const resendVerificationCode = async (userId) => {
+    const users = await getUsersLocal();
+    const user = users.find((u) => u.id === userId);
+
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (user.emailVerified) {
+      return { success: false, error: 'Email is already verified' };
+    }
+
+    // Generate new verification code
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpiry = createVerificationCodeExpiry();
+
+    // Update user with new code
+    await dbUpdateUser(userId, {
+      verificationCode,
+      verificationCodeExpiry,
+    });
+
+    return { success: true, verificationCode };
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -238,6 +343,8 @@ export const AuthProvider = ({ children }) => {
         updateUser,
         deleteAccount,
         setRememberMe,
+        verifyEmail,
+        resendVerificationCode,
       }}
     >
       {children}
