@@ -13,13 +13,28 @@ All e2e tests are located in the `e2e/` directory:
 
 ## 🚀 Getting Started
 
-### 1. Install VS Code Extension
+### 1. Install VS Code Extension (Optional)
 
-Install the official Playwright extension for VS Code:
-- Open VS Code
-- Go to Extensions (Cmd+Shift+X / Ctrl+Shift+X)
-- Search for "Playwright Test for VSCode"
-- Install the extension by Microsoft
+**Extension Name:** "Playwright Test for VSCode" by Microsoft  
+**Extension ID:** `ms-playwright.playwright`
+
+**Installation Methods:**
+1. **Via VS Code:**
+   - Open Extensions (Cmd+Shift+X / Ctrl+Shift+X)
+   - Search for "Playwright Test for VSCode"
+   - Install the extension by Microsoft
+
+2. **Via Command Palette:**
+   - Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
+   - Type: `Extensions: Install Extensions`
+   - Paste: `ms-playwright.playwright`
+   - Press Enter
+
+3. **Via Web:**
+   - Visit: https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright
+   - Click "Install" (opens VS Code)
+
+**Note:** The extension is optional! You can run all tests via CLI commands (see below).
 
 ### 2. Run Tests
 
