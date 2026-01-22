@@ -10,10 +10,11 @@ import {
   formatExpiry,
 } from '../../utils/validation';
 import { hashPasswordAsync } from '../../utils/hash';
+import EmailVerificationModal from '../../components/ui/EmailVerificationModal';
 import RememberMeModal from '../../components/ui/RememberMeModal';
 
 const SignUp = ({ navigate }) => {
-  const { signUp, setRememberMe } = useAuth();
+  const { signUp, login, setRememberMe } = useAuth();
   const [step, setStep] = useState(1);
 
   // Step 1: Account creation
@@ -37,7 +38,9 @@ const SignUp = ({ navigate }) => {
   const [cardholderName, setCardholderName] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
   const [cardErrors, setCardErrors] = useState({});
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [showRememberModal, setShowRememberModal] = useState(false);
+  const [verificationData, setVerificationData] = useState(null);
   const fileInputRef = useRef(null);
 
   // Clear errors when user types
@@ -215,7 +218,13 @@ const SignUp = ({ navigate }) => {
       const result = await signUp(name.trim(), surname.trim(), email, hashedPassword, photoBase64, cardInfo);
 
       if (result.success) {
-        setShowRememberModal(true);
+        // Show verification modal with the code
+        setVerificationData({
+          userId: result.userId,
+          email: email.trim(),
+          verificationCode: result.verificationCode,
+        });
+        setShowVerificationModal(true);
       } else {
         setSubmitError(result.error || 'Sign up failed');
         setStep(1); // Go back to step 1 to show error
@@ -247,7 +256,13 @@ const SignUp = ({ navigate }) => {
       const result = await signUp(name.trim(), surname.trim(), email, hashedPassword, photoBase64, null);
 
       if (result.success) {
-        setShowRememberModal(true);
+        // Show verification modal with the code
+        setVerificationData({
+          userId: result.userId,
+          email: email.trim(),
+          verificationCode: result.verificationCode,
+        });
+        setShowVerificationModal(true);
       } else {
         setSubmitError(result.error || 'Sign up failed');
         setStep(1);
@@ -259,8 +274,36 @@ const SignUp = ({ navigate }) => {
     }
   };
 
+  const handleEmailVerified = async () => {
+    setShowVerificationModal(false);
+    // After email is verified, log the user in
+    try {
+      const hashedPassword = await hashPasswordAsync(password);
+      const loginResult = await login(email.trim(), hashedPassword);
+      if (loginResult.success) {
+        // Show remember me modal after successful login
+        setShowRememberModal(true);
+      } else {
+        // If login fails for some reason, navigate to login page
+        navigate('/login');
+      }
+    } catch (error) {
+      // If login fails, navigate to login page
+      navigate('/login');
+    }
+  };
+
   return (
     <>
+      {showVerificationModal && verificationData && (
+        <EmailVerificationModal
+          userId={verificationData.userId}
+          email={verificationData.email}
+          verificationCode={verificationData.verificationCode}
+          onVerified={handleEmailVerified}
+          navigate={navigate}
+        />
+      )}
       {showRememberModal && (
         <RememberMeModal
           onRemember={() => {
