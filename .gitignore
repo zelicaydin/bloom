@@ -32,3 +32,10 @@ dist-ssr
 *.mp4
 !/public/hero.mp4
 !/public/forest.mp4
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+*.webm
+*.png

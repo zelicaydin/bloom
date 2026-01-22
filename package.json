@@ -14,7 +14,11 @@
     "fix-rls": "node scripts/fix-rls-policies.js",
     "migrate-to-supabase": "node scripts/migrate-backend-to-supabase.js",
     "upload-videos": "node scripts/upload-videos-to-supabase.js",
-    "upload-videos-cloudinary": "node scripts/upload-videos-to-cloudinary.js"
+    "upload-videos-cloudinary": "node scripts/upload-videos-to-cloudinary.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -24,6 +28,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^25.0.10",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
@@ -32,6 +38,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "typescript": "^5.9.3",
     "vite": "^7.2.4"
   }
 }
