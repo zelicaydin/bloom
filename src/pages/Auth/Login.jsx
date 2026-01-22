@@ -179,8 +179,9 @@ const styles = {
     justifyContent: "center",
     padding: "80px",
     paddingTop: "160px",
-    paddingBottom: "160px",
+    paddingBottom: "80px",
     backgroundColor: "#141414",
+    boxSizing: "border-box",
   },
   formWrapper: {
     width: "100%",
@@ -188,10 +189,10 @@ const styles = {
   },
   title: {
     fontSize: "2.5rem",
-    fontWeight: 400,
+    fontWeight: 600,
     color: "#fff",
     marginBottom: "8px",
-    letterSpacing: "-0.02em",
+    letterSpacing: "-0.04em",
   },
   subtitle: {
     fontSize: "1rem",
@@ -221,6 +222,7 @@ const styles = {
     color: "#fff",
     outline: "none",
     transition: "border-color 0.2s",
+    borderRadius: 0,
   },
   passwordWrapper: {
     position: "relative",

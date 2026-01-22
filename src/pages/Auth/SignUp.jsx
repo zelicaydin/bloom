@@ -17,6 +17,8 @@ const SignUp = ({ navigate }) => {
   const [step, setStep] = useState(1);
 
   // Step 1: Account creation
+  const [name, setName] = useState('');
+  const [surname, setSurname] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -40,6 +42,8 @@ const SignUp = ({ navigate }) => {
 
   // Clear errors when user types
   useEffect(() => {
+    if (errors.name && name) setErrors((prev) => ({ ...prev, name: '' }));
+    if (errors.surname && surname) setErrors((prev) => ({ ...prev, surname: '' }));
     if (errors.email && email) setErrors((prev) => ({ ...prev, email: '' }));
     if (errors.password && password)
       setErrors((prev) => ({ ...prev, password: '' }));
@@ -47,7 +51,7 @@ const SignUp = ({ navigate }) => {
       setErrors((prev) => ({ ...prev, confirmPassword: '' }));
     if (errors.photo && photo) setErrors((prev) => ({ ...prev, photo: '' }));
     if (submitError) setSubmitError('');
-  }, [email, password, confirmPassword, photo]);
+  }, [name, surname, email, password, confirmPassword, photo]);
 
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
@@ -86,6 +90,20 @@ const SignUp = ({ navigate }) => {
     e.preventDefault();
     setSubmitError('');
     const newErrors = {};
+
+    // Validate name
+    if (!name || name.trim() === '') {
+      newErrors.name = 'Name is required';
+    } else if (name.trim().length < 2) {
+      newErrors.name = 'Name must be at least 2 characters';
+    }
+
+    // Validate surname
+    if (!surname || surname.trim() === '') {
+      newErrors.surname = 'Surname is required';
+    } else if (surname.trim().length < 2) {
+      newErrors.surname = 'Surname must be at least 2 characters';
+    }
 
     // Validate email
     if (!email) {
@@ -194,7 +212,7 @@ const SignUp = ({ navigate }) => {
         : null;
 
       // Create account
-      const result = await signUp(email, hashedPassword, photoBase64, cardInfo);
+      const result = await signUp(name.trim(), surname.trim(), email, hashedPassword, photoBase64, cardInfo);
 
       if (result.success) {
         setShowRememberModal(true);
@@ -226,7 +244,7 @@ const SignUp = ({ navigate }) => {
       const hashedPassword = await hashPasswordAsync(password);
 
       // Create account without card info
-      const result = await signUp(email, hashedPassword, photoBase64, null);
+      const result = await signUp(name.trim(), surname.trim(), email, hashedPassword, photoBase64, null);
 
       if (result.success) {
         setShowRememberModal(true);
@@ -273,6 +291,44 @@ const SignUp = ({ navigate }) => {
 
           {step === 1 ? (
             <form onSubmit={handleStep1Submit} style={styles.form}>
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Name</label>
+                <input
+                  type='text'
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder='John'
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.name
+                      ? '#ff4444'
+                      : 'rgba(255,255,255,0.2)',
+                  }}
+                />
+                {errors.name && (
+                  <span style={styles.errorText}>{errors.name}</span>
+                )}
+              </div>
+
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Surname</label>
+                <input
+                  type='text'
+                  value={surname}
+                  onChange={(e) => setSurname(e.target.value)}
+                  placeholder='Doe'
+                  style={{
+                    ...styles.input,
+                    borderColor: errors.surname
+                      ? '#ff4444'
+                      : 'rgba(255,255,255,0.2)',
+                  }}
+                />
+                {errors.surname && (
+                  <span style={styles.errorText}>{errors.surname}</span>
+                )}
+              </div>
+
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Email</label>
                 <input
@@ -626,12 +682,13 @@ const styles = {
   container: {
     minHeight: '100vh',
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
     padding: '80px',
     paddingTop: '160px',
-    paddingBottom: '160px',
+    paddingBottom: '80px',
     backgroundColor: '#141414',
+    boxSizing: 'border-box',
   },
   formWrapper: {
     width: '100%',
@@ -639,10 +696,10 @@ const styles = {
   },
   title: {
     fontSize: '2.5rem',
-    fontWeight: 400,
+    fontWeight: 600,
     color: '#fff',
     marginBottom: '8px',
-    letterSpacing: '-0.02em',
+    letterSpacing: '-0.04em',
   },
   subtitle: {
     fontSize: '1rem',
@@ -676,6 +733,7 @@ const styles = {
     color: '#fff',
     outline: 'none',
     transition: 'border-color 0.2s',
+    borderRadius: 0,
   },
   row: {
     display: 'flex',

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { useProducts } from '../../store/ProductsContext';
+import { addCoupon, getUserCoupons } from '../../services/database';
 
 const Admin = ({ navigate }) => {
   const { user } = useAuth();
@@ -17,12 +18,43 @@ const Admin = ({ navigate }) => {
     price: 0,
     brand: '',
     type: '',
+    description: '',
+    image: '',
+    markers: [],
   });
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+  
+  // Coupon state
+  const [showCouponForm, setShowCouponForm] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState('');
+  const [couponDiscountType, setCouponDiscountType] = useState('percentage'); // 'percentage' or 'fixed'
+  const [couponExpiresAt, setCouponExpiresAt] = useState('');
+  const [userCoupons, setUserCoupons] = useState([]);
 
   // Load users
   useEffect(() => {
     loadUsers();
   }, []);
+
+  // Load user coupons when selected user changes
+  useEffect(() => {
+    if (selectedUser && !selectedUser.isAdmin) {
+      const loadCoupons = async () => {
+        try {
+          const coupons = await getUserCoupons(selectedUser.id);
+          setUserCoupons(coupons);
+        } catch (e) {
+          console.error('Error loading coupons:', e);
+          setUserCoupons([]);
+        }
+      };
+      loadCoupons();
+    } else {
+      setUserCoupons([]);
+    }
+  }, [selectedUser]);
 
   // Refresh selected product popularity when products list changes
   useEffect(() => {
@@ -108,9 +140,57 @@ const Admin = ({ navigate }) => {
     setShowDeleteConfirm(null);
   };
 
-  const handleAddProduct = () => {
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be less than 5MB');
+      return;
+    }
+
+    setImageFile(file);
+
+    // Create preview and convert to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result;
+      setImagePreview(base64String);
+      setNewProduct({ ...newProduct, image: base64String });
+      if (editingProduct) {
+        setEditingProduct({ ...editingProduct, image: base64String });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleMarkerToggle = (markerId) => {
+    const currentMarkers = editingProduct ? editingProduct.markers || [] : newProduct.markers || [];
+    const newMarkers = currentMarkers.includes(markerId)
+      ? currentMarkers.filter((m) => m !== markerId)
+      : [...currentMarkers, markerId];
+    
+    if (editingProduct) {
+      setEditingProduct({ ...editingProduct, markers: newMarkers });
+    } else {
+      setNewProduct({ ...newProduct, markers: newMarkers });
+    }
+  };
+
+  const handleAddProduct = async () => {
     if (newProduct.name && newProduct.brand && newProduct.type) {
-      const product = addProduct(newProduct);
+      const productToAdd = {
+        ...newProduct,
+        image: imagePreview || newProduct.image || 'https://via.placeholder.com/600x800',
+      };
+      const product = await addProduct(productToAdd);
       setSelectedProduct(product);
       setEditingProduct(null);
       setNewProduct({
@@ -118,7 +198,12 @@ const Admin = ({ navigate }) => {
         price: 0,
         brand: '',
         type: '',
+        description: '',
+        image: '',
+        markers: [],
       });
+      setImagePreview(null);
+      setImageFile(null);
       setShowAddProductForm(false); // Hide form after adding
     }
   };
@@ -156,6 +241,58 @@ const Admin = ({ navigate }) => {
   const handleEditFieldChange = (field, value) => {
     if (editingProduct) {
       setEditingProduct({ ...editingProduct, [field]: value });
+    }
+  };
+
+  const generateCouponCode = () => {
+    return `BLOOM${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+  };
+
+  const handleCreateCoupon = async () => {
+    if (!selectedUser || selectedUser.isAdmin) return;
+    
+    if (!couponCode.trim()) {
+      alert('Please enter a coupon code');
+      return;
+    }
+    
+    const discount = parseFloat(couponDiscount);
+    if (isNaN(discount) || discount <= 0) {
+      alert('Please enter a valid discount amount');
+      return;
+    }
+    
+    if (couponDiscountType === 'percentage' && discount > 100) {
+      alert('Percentage discount cannot exceed 100%');
+      return;
+    }
+
+    const coupon = {
+      id: `COUPON-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      code: couponCode.trim().toUpperCase(),
+      discount: discount,
+      discountType: couponDiscountType,
+      userId: selectedUser.id,
+      used: false,
+      createdAt: new Date().toISOString(),
+      expiresAt: couponExpiresAt || null,
+    };
+
+    try {
+      await addCoupon(coupon);
+      // Reload coupons
+      const coupons = await getUserCoupons(selectedUser.id);
+      setUserCoupons(coupons);
+      
+      // Reset form
+      setCouponCode('');
+      setCouponDiscount('');
+      setCouponDiscountType('percentage');
+      setCouponExpiresAt('');
+      setShowCouponForm(false);
+    } catch (e) {
+      console.error('Error creating coupon:', e);
+      alert('Failed to create coupon');
     }
   };
 
@@ -369,6 +506,122 @@ const Admin = ({ navigate }) => {
                   )}
                 </div>
 
+                {/* Coupons Section */}
+                {!selectedUser.isAdmin && (
+                  <div style={styles.couponsSection}>
+                    <div style={styles.couponsHeader}>
+                      <h3 style={styles.couponsTitle}>Coupons</h3>
+                      <button
+                        onClick={() => {
+                          setShowCouponForm(!showCouponForm);
+                          if (!showCouponForm) {
+                            setCouponCode(generateCouponCode());
+                          }
+                        }}
+                        style={styles.giveCouponButton}
+                      >
+                        {showCouponForm ? 'Cancel' : 'Give Coupon'}
+                      </button>
+                    </div>
+                    
+                    {showCouponForm && (
+                      <div style={styles.couponForm}>
+                        <div style={styles.formRow}>
+                          <label style={styles.formLabel}>Coupon Code</label>
+                          <div style={styles.inputWithButton}>
+                            <input
+                              type="text"
+                              value={couponCode}
+                              onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                              placeholder="BLOOM123"
+                              style={{ ...styles.formInput, flex: 1 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setCouponCode(generateCouponCode())}
+                              style={styles.generateButton}
+                            >
+                              Generate
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div style={styles.formRow}>
+                          <label style={styles.formLabel}>Discount Type</label>
+                          <select
+                            value={couponDiscountType}
+                            onChange={(e) => setCouponDiscountType(e.target.value)}
+                            style={styles.formSelect}
+                          >
+                            <option value="percentage">Percentage (%)</option>
+                            <option value="fixed">Fixed Amount ($)</option>
+                          </select>
+                        </div>
+                        
+                        <div style={styles.formRow}>
+                          <label style={styles.formLabel}>
+                            Discount {couponDiscountType === 'percentage' ? '(%)' : '($)'}
+                          </label>
+                          <input
+                            type="number"
+                            value={couponDiscount}
+                            onChange={(e) => setCouponDiscount(e.target.value)}
+                            placeholder={couponDiscountType === 'percentage' ? '10' : '5.00'}
+                            min="0"
+                            max={couponDiscountType === 'percentage' ? '100' : undefined}
+                            step={couponDiscountType === 'percentage' ? '1' : '0.01'}
+                            style={styles.formInput}
+                          />
+                        </div>
+                        
+                        <div style={styles.formRow}>
+                          <label style={styles.formLabel}>Expiry Date (Optional)</label>
+                          <input
+                            type="date"
+                            value={couponExpiresAt}
+                            onChange={(e) => setCouponExpiresAt(e.target.value)}
+                            style={styles.formInput}
+                          />
+                        </div>
+                        
+                        <button
+                          onClick={handleCreateCoupon}
+                          style={styles.createCouponButton}
+                        >
+                          Create Coupon
+                        </button>
+                      </div>
+                    )}
+                    
+                    {userCoupons.length > 0 ? (
+                      <div style={styles.couponsList}>
+                        {userCoupons.map((coupon) => (
+                          <div key={coupon.id} style={styles.couponCard}>
+                            <div style={styles.couponCardInfo}>
+                              <p style={styles.couponCardCode}>{coupon.code}</p>
+                              <p style={styles.couponCardDiscount}>
+                                {coupon.discountType === 'percentage'
+                                  ? `${coupon.discount}% off`
+                                  : `$${coupon.discount} off`}
+                              </p>
+                            </div>
+                            {coupon.expiresAt && (
+                              <p style={styles.couponCardExpiry}>
+                                Expires: {new Date(coupon.expiresAt).toLocaleDateString()}
+                              </p>
+                            )}
+                            <p style={styles.couponCardStatus}>
+                              {coupon.used ? 'Used' : 'Active'}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={styles.noCoupons}>No coupons for this user</p>
+                    )}
+                  </div>
+                )}
+
                 {!selectedUser.isAdmin && (
                   <div style={styles.actionSection}>
                     {showDeleteConfirm === selectedUser.id ? (
@@ -437,7 +690,12 @@ const Admin = ({ navigate }) => {
                           price: 0,
                           brand: '',
                           type: '',
+                          description: '',
+                          image: '',
+                          markers: [],
                         });
+                        setImagePreview(null);
+                        setImageFile(null);
                       }}
                       style={styles.formCloseButton}
                       onMouseEnter={(e) => e.target.style.opacity = '1'}
@@ -501,6 +759,61 @@ const Admin = ({ navigate }) => {
                         style={styles.input}
                       />
                     </div>
+                    <div style={{ ...styles.inputGroup, gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>Description</label>
+                      <textarea
+                        value={newProduct.description}
+                        onChange={(e) =>
+                          setNewProduct({ ...newProduct, description: e.target.value })
+                        }
+                        placeholder="Product description"
+                        style={styles.textarea}
+                        rows={4}
+                      />
+                    </div>
+                    <div style={{ ...styles.inputGroup, gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>Product Image</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        style={styles.fileInput}
+                      />
+                      {imagePreview && (
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
+                          style={styles.imagePreview}
+                        />
+                      )}
+                    </div>
+                    <div style={{ ...styles.inputGroup, gridColumn: '1 / -1' }}>
+                      <label style={styles.label}>Sustainability Markers</label>
+                      <div style={styles.markersContainer}>
+                        {['sustainablePackaging', 'organicIngredients', 'recyclable', 'crueltyFree'].map((markerId) => (
+                          <label key={markerId} style={styles.checkboxLabel}>
+                            <input
+                              type="checkbox"
+                              checked={newProduct.markers?.includes(markerId) || false}
+                              onChange={() => {
+                                const currentMarkers = newProduct.markers || [];
+                                const newMarkers = currentMarkers.includes(markerId)
+                                  ? currentMarkers.filter((m) => m !== markerId)
+                                  : [...currentMarkers, markerId];
+                                setNewProduct({ ...newProduct, markers: newMarkers });
+                              }}
+                              style={styles.checkbox}
+                            />
+                            <span style={styles.checkboxText}>
+                              {markerId === 'sustainablePackaging' && 'Sustainable Packaging'}
+                              {markerId === 'organicIngredients' && 'Organic Ingredients'}
+                              {markerId === 'recyclable' && 'Recyclable'}
+                              {markerId === 'crueltyFree' && 'Cruelty Free'}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                   <div style={styles.formActions}>
                     <button 
@@ -511,7 +824,12 @@ const Admin = ({ navigate }) => {
                           price: 0,
                           brand: '',
                           type: '',
+                          description: '',
+                          image: '',
+                          markers: [],
                         });
+                        setImagePreview(null);
+                        setImageFile(null);
                       }}
                       style={styles.cancelFormButton}
                     >
@@ -677,6 +995,111 @@ const Admin = ({ navigate }) => {
                   <div style={styles.detailCard}>
                     <div style={styles.detailIcon}>
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                      </svg>
+                    </div>
+                    <div style={styles.detailInputWrapper}>
+                      <p style={styles.detailLabel}>Description</p>
+                      {editingProduct ? (
+                        <textarea
+                          value={editingProduct.description || ''}
+                          onChange={(e) => handleEditFieldChange('description', e.target.value)}
+                          style={styles.detailTextarea}
+                          rows={4}
+                        />
+                      ) : (
+                        <p style={styles.detailValue}>
+                          {selectedProduct.description || 'No description'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={styles.detailCard}>
+                    <div style={styles.detailIcon}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                    </div>
+                    <div style={styles.detailInputWrapper}>
+                      <p style={styles.detailLabel}>Image</p>
+                      {editingProduct ? (
+                        <div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageChange}
+                            style={styles.fileInput}
+                          />
+                          {editingProduct.image && (
+                            <img
+                              src={editingProduct.image}
+                              alt="Product"
+                              style={styles.detailImagePreview}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          {selectedProduct.image ? (
+                            <img
+                              src={selectedProduct.image}
+                              alt="Product"
+                              style={styles.detailImagePreview}
+                            />
+                          ) : (
+                            <p style={styles.detailValue}>No image</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={styles.detailCard}>
+                    <div style={styles.detailIcon}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                        <path d="M2 17l10 5 10-5" />
+                        <path d="M2 12l10 5 10-5" />
+                      </svg>
+                    </div>
+                    <div style={styles.detailInputWrapper}>
+                      <p style={styles.detailLabel}>Sustainability Markers</p>
+                      {editingProduct ? (
+                        <div style={styles.markersContainer}>
+                          {['sustainablePackaging', 'organicIngredients', 'recyclable', 'crueltyFree'].map((markerId) => (
+                            <label key={markerId} style={styles.checkboxLabel}>
+                              <input
+                                type="checkbox"
+                                checked={editingProduct.markers?.includes(markerId) || false}
+                                onChange={() => handleMarkerToggle(markerId)}
+                                style={styles.checkbox}
+                              />
+                              <span style={styles.checkboxText}>
+                                {markerId === 'sustainablePackaging' && 'Sustainable Packaging'}
+                                {markerId === 'organicIngredients' && 'Organic Ingredients'}
+                                {markerId === 'recyclable' && 'Recyclable'}
+                                {markerId === 'crueltyFree' && 'Cruelty Free'}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={styles.detailValue}>
+                          {selectedProduct.markers && selectedProduct.markers.length > 0
+                            ? selectedProduct.markers.join(', ')
+                            : 'None'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={styles.detailCard}>
+                    <div style={styles.detailIcon}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                       </svg>
                     </div>
@@ -747,16 +1170,15 @@ const styles = {
     paddingTop: '160px',
     paddingInline: '80px',
     paddingBottom: '80px',
-    minHeight: '100vh',
     backgroundColor: '#141414',
     color: '#fff',
   },
   title: {
     fontSize: '2.5rem',
-    fontWeight: 400,
+    fontWeight: 600,
     color: '#fff',
     marginBottom: '40px',
-    letterSpacing: '-0.02em',
+    letterSpacing: '-0.04em',
   },
   tabs: {
     display: 'flex',
@@ -869,6 +1291,7 @@ const styles = {
     fontSize: '0.9rem',
     fontWeight: 500,
     cursor: 'pointer',
+    borderRadius: 0,
   },
   submitProductButton: {
     background: '#fff',
@@ -878,12 +1301,85 @@ const styles = {
     fontSize: '0.9rem',
     fontWeight: 500,
     cursor: 'pointer',
+    borderRadius: 0,
   },
   formGrid: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
     gap: '16px',
     marginBottom: '20px',
+  },
+  textarea: {
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '12px 16px',
+    fontSize: '1rem',
+    color: '#fff',
+    outline: 'none',
+    fontFamily: 'inherit',
+    resize: 'vertical',
+    borderRadius: 0,
+  },
+  fileInput: {
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '8px',
+    fontSize: '0.9rem',
+    color: '#fff',
+    outline: 'none',
+    width: '100%',
+    marginTop: '8px',
+    borderRadius: 0,
+  },
+  imagePreview: {
+    width: '100%',
+    maxWidth: '300px',
+    height: 'auto',
+    marginTop: '12px',
+    border: '1px solid rgba(255,255,255,0.2)',
+    borderRadius: 0,
+  },
+  markersContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    marginTop: '8px',
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  checkbox: {
+    width: '18px',
+    height: '18px',
+    cursor: 'pointer',
+  },
+  checkboxText: {
+    fontSize: '0.9rem',
+  },
+  detailTextarea: {
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '8px 12px',
+    fontSize: '1rem',
+    color: '#fff',
+    outline: 'none',
+    width: '100%',
+    marginTop: '4px',
+    fontFamily: 'inherit',
+    resize: 'vertical',
+    borderRadius: 0,
+  },
+  detailImagePreview: {
+    width: '100%',
+    maxWidth: '200px',
+    height: 'auto',
+    marginTop: '8px',
+    border: '1px solid rgba(255,255,255,0.2)',
+    borderRadius: 0,
   },
   addButton: {
     background: '#fff',
@@ -895,6 +1391,7 @@ const styles = {
     cursor: 'pointer',
     width: '100%',
     marginTop: '16px',
+    borderRadius: 0,
   },
   editButton: {
     background: '#fff',
@@ -905,6 +1402,7 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     width: '100%',
+    borderRadius: 0,
     marginBottom: '12px',
   },
   saveButton: {
@@ -1097,6 +1595,7 @@ const styles = {
     outline: 'none',
     width: '100%',
     marginTop: '4px',
+    borderRadius: 0,
   },
   actionSection: {
     marginTop: '32px',
@@ -1125,6 +1624,7 @@ const styles = {
     fontSize: '1rem',
     color: '#fff',
     outline: 'none',
+    borderRadius: 0,
   },
   confirmBox: {
     background: 'rgba(255, 68, 68, 0.1)',
@@ -1174,6 +1674,7 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     width: '100%',
+    borderRadius: 0,
   },
   errorBox: {
     textAlign: 'center',
@@ -1188,6 +1689,148 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     marginTop: '24px',
+  },
+  couponsSection: {
+    marginTop: '32px',
+    paddingTop: '32px',
+    borderTop: '1px solid rgba(255,255,255,0.1)',
+  },
+  couponsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '20px',
+  },
+  couponsTitle: {
+    fontSize: '1.2rem',
+    fontWeight: 500,
+    margin: 0,
+    color: '#fff',
+  },
+  giveCouponButton: {
+    background: '#4caf50',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 20px',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    borderRadius: 0,
+    transition: 'background 0.2s',
+  },
+  couponForm: {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    padding: '20px',
+    borderRadius: 0,
+    marginBottom: '20px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+  },
+  formRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  formLabel: {
+    fontSize: '0.9rem',
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: 500,
+  },
+  formInput: {
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '10px 12px',
+    borderRadius: 0,
+    fontSize: '0.9rem',
+    color: '#fff',
+    outline: 'none',
+  },
+  formSelect: {
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '10px 12px',
+    borderRadius: 0,
+    fontSize: '0.9rem',
+    color: '#fff',
+    outline: 'none',
+    cursor: 'pointer',
+  },
+  inputWithButton: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'stretch',
+  },
+  generateButton: {
+    background: 'rgba(255,255,255,0.1)',
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '10px 16px',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    borderRadius: 0,
+    whiteSpace: 'nowrap',
+  },
+  createCouponButton: {
+    background: '#fff',
+    color: '#000',
+    border: 'none',
+    padding: '12px 24px',
+    fontSize: '1rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    borderRadius: 0,
+    marginTop: '8px',
+  },
+  couponsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  couponCard: {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    padding: '16px',
+    borderRadius: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  couponCardInfo: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  couponCardCode: {
+    fontSize: '1rem',
+    fontWeight: 600,
+    color: '#fff',
+    margin: 0,
+    letterSpacing: '0.05em',
+  },
+  couponCardDiscount: {
+    fontSize: '0.9rem',
+    color: '#4caf50',
+    margin: 0,
+    fontWeight: 500,
+  },
+  couponCardExpiry: {
+    fontSize: '0.85rem',
+    color: 'rgba(255,255,255,0.6)',
+    margin: 0,
+  },
+  couponCardStatus: {
+    fontSize: '0.85rem',
+    color: 'rgba(255,255,255,0.5)',
+    margin: 0,
+    fontStyle: 'italic',
+  },
+  noCoupons: {
+    fontSize: '0.9rem',
+    color: 'rgba(255,255,255,0.5)',
+    margin: 0,
+    fontStyle: 'italic',
   },
 };
 

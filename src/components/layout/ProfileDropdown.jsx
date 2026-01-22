@@ -2,11 +2,83 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../store/AuthContext';
 import { hashPasswordAsync } from '../../utils/hash';
 import { validatePassword, validateCardNumber, validateExpiry, validateCVV } from '../../utils/validation';
+import { updateUser as dbUpdateUser, getUsers, getUserCoupons } from '../../services/database';
 
 const ProfileDropdown = ({ user, onClose, navigate }) => {
   const { logout, updateCardInfo } = useAuth();
   const [activeSection, setActiveSection] = useState('main'); // 'main', 'changePassword', 'addCard', 'removeCard'
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
+  // Sustainability score and breakdown
+  const [sustainabilityScore, setSustainabilityScore] = useState(0);
+  const [sustainabilityBreakdown, setSustainabilityBreakdown] = useState({
+    sustainablePackaging: 0,
+    organicIngredients: 0,
+    recyclable: 0,
+    crueltyFree: 0,
+    totalItems: 0,
+  });
+
+  // Handle sign out
+  const handleSignOut = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    console.log('handleSignOut called'); // Debug
+    
+    // Get user ID before clearing anything
+    const userId = user?.id;
+    console.log('User ID:', userId); // Debug
+    
+    // Close dropdown immediately
+    if (onClose) {
+      onClose();
+    }
+    
+    // Clear all user-related localStorage synchronously FIRST
+    try {
+      localStorage.removeItem('bloom_user');
+      localStorage.removeItem('bloom_remember_me');
+      console.log('Cleared bloom_user and bloom_remember_me'); // Debug
+      
+      // Clear cart data if user exists
+      if (userId) {
+        localStorage.removeItem(`bloom_cart_${userId}`);
+        localStorage.removeItem(`bloom_subscription_${userId}`);
+        localStorage.removeItem(`bloom_purchase_history_${userId}`);
+        localStorage.removeItem(`bloom_preferences_${userId}`);
+        console.log('Cleared user-specific data'); // Debug
+      }
+    } catch (error) {
+      console.error('Error clearing localStorage:', error);
+    }
+    
+    // Clear user state via logout function
+    try {
+      if (logout && typeof logout === 'function') {
+        console.log('Calling logout function'); // Debug
+        logout();
+        console.log('Logout function called'); // Debug
+      } else {
+        console.error('logout is not a function:', typeof logout); // Debug
+      }
+    } catch (error) {
+      console.error('Error calling logout:', error);
+    }
+    
+    // Navigate to home page
+    if (navigate && typeof navigate === 'function') {
+      navigate('/');
+    }
+    
+    // Force reload after ensuring everything is cleared
+    setTimeout(() => {
+      console.log('Reloading page now'); // Debug
+      window.location.href = '/';
+    }, 300);
+  };
   
   // Change password state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -23,17 +95,11 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
   const [billingAddress, setBillingAddress] = useState('');
   const [cardErrors, setCardErrors] = useState({});
   
+  // Coupon state
+  const [userCoupons, setUserCoupons] = useState([]);
+  
   const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose]);
+  
 
   const formatCardNumber = (value) => {
     const cleaned = value.replace(/\s/g, '');
@@ -64,7 +130,7 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
     setPasswordSuccess(false);
 
     // Validate current password
-    const users = JSON.parse(localStorage.getItem('bloom_users') || '[]');
+    const users = await getUsers();
     const userData = users.find((u) => u.id === user.id);
     
     if (!userData) {
@@ -90,10 +156,9 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
       return;
     }
 
-    // Update password
+    // Update password in database
     const hashedNew = await hashPasswordAsync(newPassword);
-    userData.password = hashedNew;
-    localStorage.setItem('bloom_users', JSON.stringify(users));
+    await dbUpdateUser(user.id, { password: hashedNew });
 
     setPasswordSuccess(true);
     setCurrentPassword('');
@@ -104,9 +169,101 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
       setPasswordSuccess(false);
     }, 2000);
   };
+  
+  // Load user coupons
+  useEffect(() => {
+    if (!user) return;
+    
+    const loadCoupons = async () => {
+      try {
+        const coupons = await getUserCoupons(user.id);
+        setUserCoupons(coupons);
+      } catch (e) {
+        console.error('Error loading coupons:', e);
+        setUserCoupons([]);
+      }
+    };
+    
+    loadCoupons();
+  }, [user]);
 
-  const handleAddCard = (e) => {
+  // Calculate sustainability score
+  useEffect(() => {
+    if (!user) return;
+    
+    const calculateSustainabilityScore = () => {
+      const purchaseHistoryKey = `bloom_purchase_history_${user.id}`;
+      const stored = localStorage.getItem(purchaseHistoryKey);
+      if (!stored) {
+        setSustainabilityScore(0);
+        return;
+      }
+      
+      try {
+        const history = JSON.parse(stored);
+        const products = JSON.parse(localStorage.getItem('bloom_products') || '[]');
+        const breakdown = {
+          sustainablePackaging: 0,
+          organicIngredients: 0,
+          recyclable: 0,
+          crueltyFree: 0,
+          totalItems: 0,
+        };
+        
+        history.forEach((order) => {
+          order.items.forEach((item) => {
+            breakdown.totalItems += item.quantity;
+            const product = products.find((p) => p.id === item.id);
+            if (product && product.markers) {
+              // Count each marker type across all purchased items
+              product.markers.forEach((marker) => {
+                if (marker === 'sustainablePackaging') {
+                  breakdown.sustainablePackaging += item.quantity;
+                } else if (marker === 'organicIngredients') {
+                  breakdown.organicIngredients += item.quantity;
+                } else if (marker === 'recyclable') {
+                  breakdown.recyclable += item.quantity;
+                } else if (marker === 'crueltyFree') {
+                  breakdown.crueltyFree += item.quantity;
+                }
+              });
+            }
+          });
+        });
+        
+        // Calculate score: percentage of items that have each marker
+        // Each marker type contributes 25% to the total score
+        // Score = average of (marker count / total items) for each marker type * 100
+        const markerScores = [
+          breakdown.sustainablePackaging / Math.max(breakdown.totalItems, 1),
+          breakdown.organicIngredients / Math.max(breakdown.totalItems, 1),
+          breakdown.recyclable / Math.max(breakdown.totalItems, 1),
+          breakdown.crueltyFree / Math.max(breakdown.totalItems, 1),
+        ];
+        const avgScore = markerScores.reduce((sum, score) => sum + score, 0) / 4;
+        const score = Math.min(100, Math.round(avgScore * 100));
+        
+        setSustainabilityScore(score);
+        setSustainabilityBreakdown(breakdown);
+      } catch (e) {
+        console.error('Error calculating sustainability score:', e);
+        setSustainabilityScore(0);
+        setSustainabilityBreakdown({
+          sustainablePackaging: 0,
+          organicIngredients: 0,
+          recyclable: 0,
+          crueltyFree: 0,
+          totalItems: 0,
+        });
+      }
+    };
+    
+    calculateSustainabilityScore();
+  }, [user]);
+  
+  const handleAddCard = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     setCardErrors({});
 
     const newCardErrors = {};
@@ -137,14 +294,20 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
       billingAddress: billingAddress || null,
     };
 
-    const result = updateCardInfo(cardInfo);
-    if (result.success) {
-      setActiveSection('main');
-      setCardNumber('');
-      setExpiry('');
-      setCvv('');
-      setCardholderName('');
-      setBillingAddress('');
+    try {
+      const result = await updateCardInfo(cardInfo);
+      if (result && result.success) {
+        setActiveSection('main');
+        setCardNumber('');
+        setExpiry('');
+        setCvv('');
+        setCardholderName('');
+        setBillingAddress('');
+      } else {
+        setCardErrors({ submit: result?.error || 'Failed to add card' });
+      }
+    } catch (error) {
+      setCardErrors({ submit: 'An error occurred. Please try again.' });
     }
   };
 
@@ -252,7 +415,7 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
             )}
           </div>
           <div style={styles.row}>
-            <div style={{ ...styles.inputGroup, flex: 1 }}>
+            <div style={{ ...styles.inputGroup, flex: '1 1 0', minWidth: 0 }}>
               <label style={styles.label}>Expiry</label>
               <input
                 type="text"
@@ -262,6 +425,8 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
                 maxLength="5"
                 style={{
                   ...styles.input,
+                  width: '100%',
+                  boxSizing: 'border-box',
                   borderColor: cardErrors.expiry ? '#ff4444' : 'rgba(255,255,255,0.2)',
                 }}
               />
@@ -269,7 +434,7 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
                 <span style={styles.errorText}>{cardErrors.expiry}</span>
               )}
             </div>
-            <div style={{ ...styles.inputGroup, flex: 1 }}>
+            <div style={{ ...styles.inputGroup, flex: '1 1 0', minWidth: 0 }}>
               <label style={styles.label}>CVV</label>
               <input
                 type="text"
@@ -279,6 +444,8 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
                 maxLength="3"
                 style={{
                   ...styles.input,
+                  width: '100%',
+                  boxSizing: 'border-box',
                   borderColor: cardErrors.cvv ? '#ff4444' : 'rgba(255,255,255,0.2)',
                 }}
               />
@@ -315,6 +482,9 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
               style={styles.input}
             />
           </div>
+          {cardErrors.submit && (
+            <div style={styles.errorBox}>{cardErrors.submit}</div>
+          )}
           <button type="submit" style={styles.submitButton}>
             Add Card
           </button>
@@ -363,11 +533,102 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
       <div style={styles.userInfo}>
         <img src={user.photo} alt="Profile" style={styles.userPhoto} />
         <div>
+          {user.name && user.surname ? (
+            <p style={styles.userName}>{user.name} {user.surname}</p>
+          ) : null}
           <p style={styles.userEmail}>{user.email}</p>
           <p style={styles.userSince}>
             Member since {new Date(user.createdAt).toLocaleDateString()}
           </p>
         </div>
+      </div>
+
+      <div style={styles.divider} />
+
+      {/* Sustainability Score - Redesigned with Statistics */}
+      <div style={styles.sustainabilitySection}>
+        <p style={styles.sectionTitle}>Sustainability Score</p>
+        {sustainabilityBreakdown.totalItems > 0 ? (
+          <>
+            <div style={styles.scoreDisplay}>
+              <div style={styles.scoreText}>
+                <span style={styles.scoreValue}>{sustainabilityScore}</span>
+                <span style={styles.scorePercent}>%</span>
+              </div>
+              <div style={styles.statsSummary}>
+                <p style={styles.totalItems}>{sustainabilityBreakdown.totalItems} items purchased</p>
+                <p style={styles.scoreLabel}>Overall sustainability</p>
+              </div>
+            </div>
+            
+            <div style={styles.markersStats}>
+              {[
+                { key: 'sustainablePackaging', label: 'Sustainable Packaging', color: '#4caf50' },
+                { key: 'organicIngredients', label: 'Organic Ingredients', color: '#81c784' },
+                { key: 'recyclable', label: 'Recyclable', color: '#66bb6a' },
+                { key: 'crueltyFree', label: 'Cruelty Free', color: '#a5d6a7' },
+              ].map((marker) => {
+                const count = sustainabilityBreakdown[marker.key];
+                const percentage = Math.round((count / sustainabilityBreakdown.totalItems) * 100);
+                const barWidth = percentage;
+                
+                return (
+                  <div key={marker.key} style={styles.markerStat}>
+                    <div style={styles.markerHeader}>
+                      <span style={styles.markerLabel}>{marker.label}</span>
+                      <span style={styles.markerCount}>{count}/{sustainabilityBreakdown.totalItems}</span>
+                    </div>
+                    <div style={styles.progressBarContainer}>
+                      <div 
+                        style={{
+                          ...styles.progressBar,
+                          width: `${barWidth}%`,
+                          backgroundColor: marker.color,
+                        }}
+                      />
+                    </div>
+                    <span style={styles.markerPercentage}>{percentage}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div style={styles.emptyState}>
+            <p style={styles.emptyText}>No purchases yet</p>
+            <p style={styles.emptySubtext}>Start shopping to build your sustainability score</p>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.divider} />
+
+      {/* Coupons Section */}
+      <div style={styles.menuSection}>
+        <p style={styles.sectionTitle}>Coupons</p>
+        {userCoupons.length > 0 ? (
+          <div style={styles.couponsList}>
+            {userCoupons.map((coupon) => (
+              <div key={coupon.id} style={styles.couponItem}>
+                <div style={styles.couponInfo}>
+                  <p style={styles.couponCode}>{coupon.code}</p>
+                  <p style={styles.couponDiscount}>
+                    {coupon.discountType === 'percentage'
+                      ? `${coupon.discount}% off`
+                      : `$${coupon.discount} off`}
+                  </p>
+                </div>
+                {coupon.expiresAt && (
+                  <p style={styles.couponExpiry}>
+                    Expires: {new Date(coupon.expiresAt).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={styles.noCoupons}>No active coupons</p>
+        )}
       </div>
 
       <div style={styles.divider} />
@@ -392,8 +653,24 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
             </>
           ) : (
             <button
-              onClick={() => setActiveSection('addCard')}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveSection('addCard');
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+              }}
               style={styles.menuItem}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                e.currentTarget.style.borderRadius = '0';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.borderRadius = '0';
+              }}
             >
               Add Payment Card
             </button>
@@ -404,8 +681,57 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
 
         <div style={styles.menuSection}>
           <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onClose) {
+                onClose();
+              }
+              if (navigate) {
+                navigate('/purchase-history');
+              }
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+            style={styles.menuItem}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            Purchase History
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onClose) {
+                onClose();
+              }
+              if (navigate) {
+                navigate('/profile/edit');
+              }
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+            style={styles.menuItem}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            Edit Profile
+          </button>
+        </div>
+
+        <div style={styles.divider} />
+
+        <div style={styles.menuSection}>
+          <button
             onClick={() => setActiveSection('changePassword')}
             style={styles.menuItem}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
           >
             Change Password
           </button>
@@ -415,12 +741,14 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
 
         <div style={styles.menuSection}>
           <button
-            onClick={() => {
-              logout();
-              navigate('/');
-              onClose();
+            type="button"
+            onClick={handleSignOut}
+            onMouseDown={(e) => {
+              e.stopPropagation();
             }}
             style={styles.menuItem}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
           >
             Sign Out
           </button>
@@ -458,9 +786,7 @@ const ProfileDropdown = ({ user, onClose, navigate }) => {
 
 const styles = {
   dropdown: {
-    position: 'absolute',
-    top: 'calc(100% + 16px)',
-    right: '0',
+    position: 'relative',
     width: '360px',
     background: '#1a1a1a',
     border: '1px solid rgba(255,255,255,0.1)',
@@ -503,11 +829,18 @@ const styles = {
     border: '1px solid rgba(255,255,255,0.2)',
     borderRadius: '50%',
   },
-  userEmail: {
+  userName: {
     margin: 0,
     fontSize: '1rem',
     fontWeight: 500,
     color: '#fff',
+    marginBottom: '4px',
+  },
+  userEmail: {
+    margin: 0,
+    fontSize: '0.9rem',
+    fontWeight: 400,
+    color: 'rgba(255,255,255,0.7)',
   },
   userSince: {
     margin: '4px 0 0 0',
@@ -527,6 +860,7 @@ const styles = {
   },
   sectionTitle: {
     padding: '8px 20px',
+    paddingBottom: '16px',
     fontSize: '0.75rem',
     fontWeight: 600,
     color: 'rgba(255,255,255,0.5)',
@@ -560,6 +894,7 @@ const styles = {
     fontSize: '0.95rem',
     cursor: 'pointer',
     transition: 'background 0.2s',
+    borderRadius: 0,
   },
   dangerItem: {
     color: '#ff4444',
@@ -591,6 +926,7 @@ const styles = {
     fontSize: '0.9rem',
     color: '#fff',
     outline: 'none',
+    borderRadius: 0,
   },
   row: {
     display: 'flex',
@@ -623,6 +959,7 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     marginTop: '8px',
+    borderRadius: 0,
   },
   confirmSection: {
     padding: '20px',
@@ -644,6 +981,7 @@ const styles = {
     padding: '10px 20px',
     fontSize: '0.9rem',
     cursor: 'pointer',
+    borderRadius: 0,
   },
   dangerButton: {
     flex: 1,
@@ -653,6 +991,7 @@ const styles = {
     padding: '10px 20px',
     fontSize: '0.9rem',
     cursor: 'pointer',
+    borderRadius: 0,
   },
   deleteConfirm: {
     padding: '12px 20px',
@@ -661,6 +1000,156 @@ const styles = {
     margin: '0 0 12px 0',
     color: '#ff4444',
     fontSize: '0.9rem',
+  },
+  sustainabilitySection: {
+    padding: '8px 0',
+  },
+  scoreDisplay: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    marginBottom: '20px',
+    alignItems: 'flex-start',
+    paddingLeft: '20px',
+    paddingRight: '20px',
+  },
+  scoreText: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '4px',
+  },
+  scoreValue: {
+    fontSize: '2rem',
+    fontWeight: 600,
+    color: '#4caf50',
+    lineHeight: 1,
+    letterSpacing: '-0.02em',
+  },
+  scorePercent: {
+    fontSize: '1.2rem',
+    fontWeight: 500,
+    color: 'rgba(76, 175, 80, 0.7)',
+    lineHeight: 1,
+  },
+  statsSummary: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    width: '100%',
+  },
+  totalItems: {
+    fontSize: '0.9rem',
+    color: 'rgba(255,255,255,0.8)',
+    margin: 0,
+    fontWeight: 500,
+  },
+  scoreLabel: {
+    fontSize: '0.75rem',
+    color: 'rgba(255,255,255,0.6)',
+    margin: 0,
+  },
+  markersStats: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    paddingLeft: '20px',
+    paddingRight: '20px',
+  },
+  markerStat: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  markerHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  markerLabel: {
+    fontSize: '0.8rem',
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: 500,
+  },
+  markerCount: {
+    fontSize: '0.75rem',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: '6px',
+    background: 'rgba(255,255,255,0.1)',
+    borderRadius: 0,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    transition: 'width 0.3s ease',
+    borderRadius: 0,
+  },
+  markerPercentage: {
+    fontSize: '0.7rem',
+    color: 'rgba(255,255,255,0.5)',
+    alignSelf: 'flex-end',
+  },
+  emptyState: {
+    textAlign: 'left',
+    padding: '20px',
+  },
+  emptyText: {
+    fontSize: '0.9rem',
+    color: 'rgba(255,255,255,0.6)',
+    margin: '0 0 4px 0',
+  },
+  emptySubtext: {
+    fontSize: '0.75rem',
+    color: 'rgba(255,255,255,0.4)',
+    margin: 0,
+  },
+  couponsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    paddingLeft: '20px',
+    paddingRight: '20px',
+  },
+  couponItem: {
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    padding: '12px',
+    borderRadius: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  couponInfo: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  couponCode: {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    color: '#fff',
+    margin: 0,
+    letterSpacing: '0.05em',
+  },
+  couponDiscount: {
+    fontSize: '0.85rem',
+    color: '#4caf50',
+    margin: 0,
+    fontWeight: 500,
+  },
+  couponExpiry: {
+    fontSize: '0.75rem',
+    color: 'rgba(255,255,255,0.5)',
+    margin: 0,
+  },
+  noCoupons: {
+    fontSize: '0.9rem',
+    color: 'rgba(255,255,255,0.5)',
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    margin: 0,
   },
 };
 

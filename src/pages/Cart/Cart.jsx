@@ -16,6 +16,13 @@ const Cart = ({ navigate }) => {
       <section style={styles.container}>
         <h1 style={styles.title}>Cart</h1>
         <div style={styles.emptyCart}>
+          <div style={styles.emptyIcon}>
+            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="9" cy="21" r="1" />
+              <circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.6 13.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6L23 6H6" />
+            </svg>
+          </div>
           <p style={styles.emptyText}>Your cart is empty</p>
           <button
             onClick={() => navigate('/catalogue')}
@@ -41,12 +48,16 @@ const Cart = ({ navigate }) => {
         </div>
 
         {/* Items */}
-        {cartItems.map((item) => {
+        {cartItems.map((item, index) => {
           const product = getProductDetails(item);
           const itemTotal = product.price * item.quantity;
+          const isLastItem = index === cartItems.length - 1;
 
           return (
-            <div key={item.id} style={styles.row}>
+            <div key={item.id} style={{
+              ...styles.row,
+              borderBottom: isLastItem ? 'none' : '1px solid rgba(255,255,255,0.05)',
+            }}>
               <div style={styles.columnProduct}>
                 <h3 style={styles.productName}>{product.name}</h3>
                 <p style={styles.productDescription}>
@@ -99,24 +110,29 @@ const styles = {
     paddingTop: '160px',
     paddingInline: '80px',
     paddingBottom: '80px',
-    minHeight: '100vh',
     backgroundColor: '#141414',
     color: '#fff',
   },
   title: {
     fontSize: '2.5rem',
-    fontWeight: 400,
+    fontWeight: 600,
     color: '#fff',
     marginBottom: '60px',
-    letterSpacing: '-0.02em',
+    letterSpacing: '-0.04em',
   },
   emptyCart: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '80px 0',
-    gap: '24px',
+    padding: '120px 0',
+    gap: '32px',
+  },
+  emptyIcon: {
+    color: 'rgba(255,255,255,0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: '1.2rem',
@@ -131,6 +147,7 @@ const styles = {
     fontSize: '1rem',
     fontWeight: 500,
     cursor: 'pointer',
+    borderRadius: 0,
   },
   table: {
     display: 'flex',
@@ -150,7 +167,6 @@ const styles = {
     gridTemplateColumns: '2fr 1fr 1fr',
     gap: '40px',
     padding: '32px 0',
-    borderBottom: '1px solid rgba(255,255,255,0.05)',
     alignItems: 'center',
   },
   columnProduct: {
@@ -237,6 +253,7 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     transition: 'opacity 0.2s',
+    borderRadius: 0,
   },
 };
 

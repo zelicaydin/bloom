@@ -6,7 +6,6 @@ import {
   addUser as dbAddUser,
   updateUser as dbUpdateUser,
   deleteUser as dbDeleteUser,
-  migrateToSupabase,
 } from '../services/database';
 
 const AuthContext = createContext(null);
@@ -28,9 +27,6 @@ export const AuthProvider = ({ children }) => {
   // Load user from database on mount
   useEffect(() => {
     const initializeAuth = async () => {
-      // Try to migrate existing data to Supabase if configured
-      await migrateToSupabase();
-
       // Get all existing users from database
       const users = await getUsersLocal();
 
@@ -53,6 +49,8 @@ export const AuthProvider = ({ children }) => {
         // Create/update admin account
         const adminUser = {
           id: 'admin-001',
+          name: 'Admin',
+          surname: 'Bloom',
           email: 'admin@bloom.com',
           password: adminPassword,
           photo: adminPhoto,
@@ -73,15 +71,32 @@ export const AuthProvider = ({ children }) => {
 
       if (storedUser && rememberMe) {
         try {
-          setUser(JSON.parse(storedUser));
+          const parsedUser = JSON.parse(storedUser);
+          // Only set user if it's a valid user object with an id
+          if (parsedUser && typeof parsedUser === 'object' && parsedUser.id) {
+            setUser(parsedUser);
+          } else {
+            // Invalid user data, clear it
+            localStorage.removeItem('bloom_user');
+            localStorage.removeItem('bloom_remember_me');
+            setUser(null);
+          }
         } catch (e) {
           console.error('Error parsing user data:', e);
           localStorage.removeItem('bloom_user');
           localStorage.removeItem('bloom_remember_me');
+          setUser(null);
         }
-      } else if (storedUser && !rememberMe) {
-        // Clear user if remember me is false
-        localStorage.removeItem('bloom_user');
+      } else {
+        // No remember me or no stored user - ensure user is null and clear any stale data
+        if (storedUser) {
+          localStorage.removeItem('bloom_user');
+        }
+        // Always clear remember_me if it's not explicitly true
+        if (!rememberMe) {
+          localStorage.removeItem('bloom_remember_me');
+        }
+        setUser(null);
       }
       setLoading(false);
     };
@@ -89,7 +104,7 @@ export const AuthProvider = ({ children }) => {
     initializeAuth();
   }, []);
 
-  const signUp = async (email, password, photo, cardInfo = null) => {
+  const signUp = async (name, surname, email, password, photo, cardInfo = null) => {
     const users = await getUsersLocal();
 
     // Check if user already exists
@@ -100,6 +115,8 @@ export const AuthProvider = ({ children }) => {
     // Create new user
     const newUser = {
       id: Date.now().toString(),
+      name,
+      surname,
       email,
       password, // Already hashed before calling this
       photo,
@@ -142,9 +159,25 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    // Get user ID before clearing (for cart cleanup)
+    const userId = user?.id;
+    
+    // Clear user state immediately
     setUser(null);
+    
+    // Clear all user-related localStorage
     localStorage.removeItem('bloom_user');
     localStorage.removeItem('bloom_remember_me');
+    
+    // Clear cart data if user exists
+    if (userId) {
+      localStorage.removeItem(`bloom_cart_${userId}`);
+    }
+    
+    // Clear subscription data if exists
+    if (userId) {
+      localStorage.removeItem(`bloom_subscription_${userId}`);
+    }
   };
 
   const setRememberMe = (remember) => {
@@ -162,6 +195,19 @@ export const AuthProvider = ({ children }) => {
     await dbUpdateUser(user.id, { cardInfo });
 
     const updatedUser = { ...user, cardInfo };
+    setUser(updatedUser);
+    localStorage.setItem('bloom_user', JSON.stringify(updatedUser));
+
+    return { success: true };
+  };
+
+  const updateUser = async (userData) => {
+    if (!user) return { success: false, error: 'Not logged in' };
+
+    // Update in database
+    await dbUpdateUser(user.id, userData);
+
+    const updatedUser = { ...user, ...userData };
     setUser(updatedUser);
     localStorage.setItem('bloom_user', JSON.stringify(updatedUser));
 
@@ -189,6 +235,7 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         updateCardInfo,
+        updateUser,
         deleteAccount,
         setRememberMe,
       }}

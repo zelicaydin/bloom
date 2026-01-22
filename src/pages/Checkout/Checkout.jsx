@@ -10,6 +10,7 @@ import {
   formatCardNumber,
   formatExpiry,
 } from '../../utils/validation';
+import { validateCoupon, useCoupon } from '../../services/database';
 
 const Checkout = ({ navigate }) => {
   const { user, updateCardInfo } = useAuth();
@@ -33,6 +34,12 @@ const Checkout = ({ navigate }) => {
   const [billingAddress, setBillingAddress] = useState('');
   const [cardErrors, setCardErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
+  
+  // Coupon state
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState('');
+  const [couponSuccess, setCouponSuccess] = useState('');
 
   // Add CSS animations for success page
   useEffect(() => {
@@ -163,12 +170,115 @@ const Checkout = ({ navigate }) => {
     }
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) {
+      setCouponError('Please enter a coupon code');
+      return;
+    }
+
+    setCouponError('');
+    setCouponSuccess('');
+
+    const result = await validateCoupon(couponCode.trim(), user.id);
+    
+    if (result.success) {
+      setAppliedCoupon(result.coupon);
+      setCouponSuccess('Coupon applied successfully!');
+      setCouponCode('');
+    } else {
+      setCouponError(result.error || 'Invalid coupon code');
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode('');
+    setCouponError('');
+    setCouponSuccess('');
+  };
+
+  const calculateDiscount = (subtotal) => {
+    if (!appliedCoupon) return 0;
+    
+    if (appliedCoupon.discountType === 'percentage') {
+      return (subtotal * appliedCoupon.discount) / 100;
+    } else {
+      // Fixed amount
+      return Math.min(appliedCoupon.discount, subtotal);
+    }
+  };
+
   const handlePayment = async () => {
     setIsProcessing(true);
 
     try {
       // Simulate payment processing
       await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      // Create order object for purchase history
+      const orderItems = cartItems.map((item) => {
+        const product = getProductDetails(item);
+        return {
+          id: product.id || item.id,
+          name: product.name || item.name,
+          brand: product.brand || item.brand || '',
+          image: product.image || item.image || 'https://via.placeholder.com/100x100',
+          price: product.price || item.price || 0,
+          quantity: item.quantity,
+        };
+      });
+
+      const subtotal = cartItems.reduce((sum, item) => {
+        const product = getProductDetails(item);
+        const itemPrice = product.price || item.price || 0;
+        return sum + itemPrice * item.quantity;
+      }, 0);
+
+      const discount = calculateDiscount(subtotal);
+      const orderTotal = Math.max(0, subtotal - discount);
+
+      const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      
+      // Mark coupon as used if one was applied
+      if (appliedCoupon) {
+        await useCoupon(appliedCoupon.id, orderId);
+      }
+      
+      const order = {
+        id: orderId,
+        date: new Date().toISOString(),
+        subtotal: subtotal,
+        discount: discount,
+        total: orderTotal,
+        items: orderItems,
+        coupon: appliedCoupon ? {
+          code: appliedCoupon.code,
+          discount: appliedCoupon.discount,
+          discountType: appliedCoupon.discountType,
+        } : null,
+        paymentMethod: user?.cardInfo?.cardNumber
+          ? {
+              cardLast4: user.cardInfo.cardNumber.slice(-4),
+            }
+          : null,
+      };
+
+      // Save to purchase history
+      const purchaseHistoryKey = `bloom_purchase_history_${user.id}`;
+      const existingHistory = localStorage.getItem(purchaseHistoryKey);
+      let purchaseHistory = [];
+      
+      if (existingHistory) {
+        try {
+          purchaseHistory = JSON.parse(existingHistory);
+        } catch (e) {
+          console.error('Error parsing purchase history:', e);
+          purchaseHistory = [];
+        }
+      }
+
+      purchaseHistory.push(order);
+      localStorage.setItem(purchaseHistoryKey, JSON.stringify(purchaseHistory));
 
       // Clear cart
       clearCart();
@@ -217,12 +327,15 @@ const Checkout = ({ navigate }) => {
     );
   }
 
-  // Calculate total using product prices
-  const total = cartItems.reduce((sum, item) => {
+  // Calculate subtotal and total with discount
+  const subtotal = cartItems.reduce((sum, item) => {
     const product = getProductDetails(item);
     const itemPrice = product.price || item.price || 0;
     return sum + itemPrice * item.quantity;
   }, 0);
+  
+  const discount = calculateDiscount(subtotal);
+  const total = Math.max(0, subtotal - discount);
   
   const hasCardInfo = user?.cardInfo;
 
@@ -235,11 +348,15 @@ const Checkout = ({ navigate }) => {
         <div style={styles.summary}>
           <h2 style={styles.sectionTitle}>Order Summary</h2>
           <div style={styles.itemsList}>
-            {cartItems.map((item) => {
+            {cartItems.map((item, index) => {
               const product = getProductDetails(item);
               const itemPrice = product.price || item.price || 0;
+              const isLastItem = index === cartItems.length - 1;
               return (
-                <div key={item.id} style={styles.summaryItem}>
+                <div key={item.id} style={{
+                  ...styles.summaryItem,
+                  borderBottom: isLastItem ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                }}>
                   <div>
                     <p style={styles.itemName}>{product.name || item.name}</p>
                     <p style={styles.itemDetails}>
@@ -253,9 +370,86 @@ const Checkout = ({ navigate }) => {
               );
             })}
           </div>
-          <div style={styles.totalRow}>
-            <p style={styles.totalLabel}>Total:</p>
-            <p style={styles.totalAmount}>${total.toFixed(2)}</p>
+          
+          {/* Coupon Section */}
+          {cartItems.length > 0 && (
+            <div style={{
+              ...styles.couponSection,
+              borderTop: cartItems.length > 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+            }}>
+            <h3 style={styles.couponTitle}>Have a coupon code?</h3>
+            {appliedCoupon ? (
+              <div style={styles.appliedCoupon}>
+                <div style={styles.appliedCouponInfo}>
+                  <p style={styles.appliedCouponCode}>{appliedCoupon.code}</p>
+                  <p style={styles.appliedCouponDiscount}>
+                    {appliedCoupon.discountType === 'percentage'
+                      ? `${appliedCoupon.discount}% off`
+                      : `$${appliedCoupon.discount} off`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  style={styles.removeCouponButton}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div style={styles.couponInputGroup}>
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={(e) => {
+                    setCouponCode(e.target.value.toUpperCase());
+                    setCouponError('');
+                    setCouponSuccess('');
+                  }}
+                  placeholder="Enter coupon code"
+                  style={{
+                    ...styles.couponInput,
+                    borderColor: couponError ? '#ff4444' : 'rgba(255,255,255,0.2)',
+                  }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleApplyCoupon();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyCoupon}
+                  style={styles.applyCouponButton}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+            {couponError && <p style={styles.couponError}>{couponError}</p>}
+            {couponSuccess && <p style={styles.couponSuccess}>{couponSuccess}</p>}
+            </div>
+          )}
+
+          {/* Totals */}
+          <div style={styles.totalsSection}>
+            <div style={styles.totalRow}>
+              <p style={styles.totalLabel}>Subtotal:</p>
+              <p style={styles.totalAmount}>${subtotal.toFixed(2)}</p>
+            </div>
+            {appliedCoupon && discount > 0 && (
+              <div style={styles.totalRow}>
+                <p style={styles.discountLabel}>
+                  Discount ({appliedCoupon.code}):
+                </p>
+                <p style={styles.discountAmount}>-${discount.toFixed(2)}</p>
+              </div>
+            )}
+            <div style={{ ...styles.totalRow, ...styles.finalTotalRow }}>
+              <p style={styles.totalLabel}>Total:</p>
+              <p style={styles.totalAmount}>${total.toFixed(2)}</p>
+            </div>
           </div>
         </div>
 
@@ -425,7 +619,6 @@ const styles = {
     paddingTop: '160px',
     paddingInline: '80px',
     paddingBottom: '80px',
-    minHeight: '100vh',
     backgroundColor: '#141414',
     color: '#fff',
     maxWidth: '1440px',
@@ -433,10 +626,10 @@ const styles = {
   },
   title: {
     fontSize: '2.5rem',
-    fontWeight: 400,
+    fontWeight: 600,
     color: '#fff',
     marginBottom: '60px',
-    letterSpacing: '-0.02em',
+    letterSpacing: '-0.04em',
   },
   content: {
     display: 'grid',
@@ -446,7 +639,8 @@ const styles = {
   summary: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     padding: '32px',
-    borderRadius: '8px',
+    paddingBottom: '32px',
+    borderRadius: 0,
   },
   sectionTitle: {
     fontSize: '1.5rem',
@@ -465,7 +659,6 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     paddingBottom: '20px',
-    borderBottom: '1px solid rgba(255,255,255,0.1)',
   },
   itemName: {
     fontSize: '1rem',
@@ -504,7 +697,7 @@ const styles = {
   payment: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     padding: '32px',
-    borderRadius: '8px',
+    borderRadius: 0,
   },
   subtitle: {
     fontSize: '0.9rem',
@@ -534,6 +727,7 @@ const styles = {
     background: 'rgba(44, 44, 44, 1)',
     border: '1px solid rgba(255,255,255,0.2)',
     padding: '14px 16px',
+    borderRadius: 0,
     fontSize: '1rem',
     color: '#fff',
     outline: 'none',
@@ -569,7 +763,7 @@ const styles = {
   cardInfo: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     padding: '20px',
-    borderRadius: '8px',
+    borderRadius: 0,
     marginBottom: '24px',
   },
   cardText: {
@@ -629,6 +823,117 @@ const styles = {
     cursor: 'pointer',
     transition: 'transform 0.2s, opacity 0.2s',
     animation: 'slideUp 0.6s ease-out 0.5s both',
+    borderRadius: 0,
+  },
+  couponSection: {
+    marginTop: '24px',
+    paddingTop: '24px',
+    paddingBottom: '0',
+    marginBottom: '0',
+    borderTop: '1px solid rgba(255,255,255,0.1)',
+  },
+  couponTitle: {
+    fontSize: '1rem',
+    fontWeight: 500,
+    marginBottom: '12px',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  couponInputGroup: {
+    display: 'flex',
+    gap: '8px',
+  },
+  couponInput: {
+    flex: 1,
+    background: 'rgba(44, 44, 44, 1)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '10px 12px',
+    borderRadius: 0,
+    fontSize: '0.9rem',
+    color: '#fff',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+    textTransform: 'uppercase',
+  },
+  applyCouponButton: {
+    background: 'rgba(255,255,255,0.1)',
+    color: '#fff',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '10px 20px',
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+    borderRadius: 0,
+    transition: 'background 0.2s',
+    whiteSpace: 'nowrap',
+  },
+  appliedCoupon: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    background: 'rgba(76, 175, 80, 0.1)',
+    border: '1px solid rgba(76, 175, 80, 0.3)',
+    padding: '12px',
+    borderRadius: 0,
+  },
+  appliedCouponInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  appliedCouponCode: {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    color: '#4caf50',
+    margin: 0,
+  },
+  appliedCouponDiscount: {
+    fontSize: '0.85rem',
+    color: 'rgba(255,255,255,0.8)',
+    margin: 0,
+  },
+  removeCouponButton: {
+    background: 'transparent',
+    color: 'rgba(255,255,255,0.6)',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '6px 12px',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    borderRadius: 0,
+    transition: 'all 0.2s',
+  },
+  couponError: {
+    fontSize: '0.85rem',
+    color: '#ff4444',
+    marginTop: '8px',
+    margin: 0,
+  },
+  couponSuccess: {
+    fontSize: '0.85rem',
+    color: '#4caf50',
+    marginTop: '8px',
+    margin: 0,
+  },
+  totalsSection: {
+    marginTop: '24px',
+    paddingTop: '24px',
+    paddingBottom: '0',
+  },
+  discountLabel: {
+    fontSize: '1rem',
+    fontWeight: 500,
+    margin: 0,
+    color: '#4caf50',
+  },
+  discountAmount: {
+    fontSize: '1rem',
+    fontWeight: 600,
+    margin: 0,
+    color: '#4caf50',
+  },
+  finalTotalRow: {
+    marginTop: '8px',
+    paddingTop: '8px',
+    borderTop: '1px solid rgba(255,255,255,0.1)',
   },
 };
 

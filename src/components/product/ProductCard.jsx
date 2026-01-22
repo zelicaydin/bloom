@@ -5,8 +5,6 @@ const ProductCard = ({ product, navigate }) => {
 
   const handleClick = () => {
     if (navigate) {
-      // Scroll to top before navigating
-      window.scrollTo({ top: 0, behavior: 'smooth' });
       navigate(`/product/${product.id}`);
     }
   };
@@ -21,22 +19,24 @@ const ProductCard = ({ product, navigate }) => {
       onMouseLeave={() => setHover(false)}
       onClick={handleClick}
     >
+            
       <div style={styles.imageWrapper}>
         <img
           src={product.image || 'https://via.placeholder.com/400'}
           alt={product.name}
           style={styles.image}
+          onError={(e) => {
+            e.target.src = 'https://via.placeholder.com/400';
+          }}
         />
       </div>
-
       {/* Type • Brand above name */}
       <p style={styles.typeBrand}>
         {product.type} • {product.brand}
       </p>
-
       <h3 style={styles.name}>{product.name}</h3>
-
       <p style={styles.price}>${product.price}</p>
+          
     </div>
   );
 };
@@ -51,7 +51,7 @@ const styles = {
   imageWrapper: {
     position: 'relative',
     width: '100%',
-    height: '330px',
+    height: '320px',
     overflow: 'hidden',
     backgroundColor: '#333', // dark gray behind image
   },

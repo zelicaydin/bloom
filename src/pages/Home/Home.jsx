@@ -2,11 +2,11 @@ import Hero from "./Hero.jsx";
 import Categories from "./Categories.jsx";
 import Tagline from "./Tagline.jsx";
 
-const Home = () => {
+const Home = ({ navigate }) => {
   return (
     <>
       <Hero />
-      <Categories />
+      <Categories navigate={navigate} />
       <Tagline />
     </>
   );

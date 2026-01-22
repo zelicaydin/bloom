@@ -1,12 +1,9 @@
 import React from 'react';
 
-const Rating = ({
-  rating = 0,
-  reviews = 0,
-  size = 20,
-  color = '#ffffffff',
-}) => {
-  if (reviews === 0) {
+const Rating = ({ rating = 0, reviews = 0, size = 20, color = '#ffffff' }) => {
+  // Only show stars if there are actual user reviews
+  // If no reviews, don't show stars at all
+  if (reviews === 0 || rating === 0) {
     return (
       <div style={styles.container}>
         <span style={styles.noRatings}>
@@ -52,8 +49,9 @@ const Rating = ({
         </svg>
       );
     } else {
+      // Empty star - use white stroke with no fill
       return (
-        <svg {...starProps}>
+        <svg {...starProps} stroke={color} fill='none'>
           <polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2' />
         </svg>
       );

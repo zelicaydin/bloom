@@ -6,7 +6,6 @@ import {
   addProduct as dbAddProduct,
   updateProduct as dbUpdateProduct,
   deleteProduct as dbDeleteProduct,
-  migrateToSupabase,
 } from '../services/database';
 
 const ProductsContext = createContext(null);
@@ -29,17 +28,35 @@ const getProductPopularity = (productId) => {
 export const ProductsProvider = ({ children }) => {
   const [products, setProducts] = useState([]);
 
-  // Load products from database (Supabase or localStorage)
+  // Load products from localStorage
   useEffect(() => {
     const loadProducts = async () => {
-      // Try to migrate existing data to Supabase if configured
-      await migrateToSupabase();
-
       let loadedProducts = await getProducts();
 
       // If no products found, use defaults
       if (!loadedProducts || loadedProducts.length === 0) {
         loadedProducts = [...defaultProducts];
+        await saveProducts(loadedProducts);
+      } else {
+        // Merge default product data (like images) with existing products
+        // This ensures existing products get new fields from defaults
+        const defaultProductsMap = new Map(
+          defaultProducts.map((p) => [p.id, p])
+        );
+        loadedProducts = loadedProducts.map((product) => {
+          const defaultProduct = defaultProductsMap.get(product.id);
+          if (defaultProduct) {
+            // Merge default product data (especially image) with existing product
+            return {
+              ...defaultProduct,
+              ...product, // Existing product data takes precedence
+              // But ensure image is set from default if missing
+              image: product.image || defaultProduct.image,
+            };
+          }
+          return product;
+        });
+        // Save merged products back to localStorage
         await saveProducts(loadedProducts);
       }
 
