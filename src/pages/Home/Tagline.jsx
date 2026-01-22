@@ -17,7 +17,11 @@ const TaglineSection = () => {
         loop
         playsInline
       >
-        <source src="/forest.mp4" type="video/mp4" />
+        {/* Use environment variable for video URL, fallback to local file */}
+        <source 
+          src={import.meta.env.VITE_FOREST_VIDEO_URL || '/forest.mp4'} 
+          type="video/mp4" 
+        />
       </video>
     </section>
   );

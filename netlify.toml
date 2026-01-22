@@ -10,6 +10,8 @@
   # Environment variables (set these in Netlify dashboard)
   # VITE_SUPABASE_URL = "your-supabase-url"
   # VITE_SUPABASE_ANON_KEY = "your-supabase-anon-key"
+  # VITE_HERO_VIDEO_URL = "https://your-cdn.com/hero.mp4" (optional - for external video hosting)
+  # VITE_FOREST_VIDEO_URL = "https://your-cdn.com/forest.mp4" (optional - for external video hosting)
 
 # Redirect rules for SPA (Single Page Application)
 # All routes should go to index.html for client-side routing
