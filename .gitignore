@@ -24,9 +24,11 @@ dist-ssr
 *.sw?
 
 # Large media files (keep locally, don't push to GitHub)
-*.mp4
+# Note: hero.mp4 and forest.mp4 are needed for deployment, so they're committed
 *.mov
 *.avi
 *.mkv
-public/forest.mp4
-public/hero.mp4
+# Ignore mp4 files except the ones we need for the homepage
+*.mp4
+!/public/hero.mp4
+!/public/forest.mp4
