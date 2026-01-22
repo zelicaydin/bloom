@@ -12,6 +12,9 @@ import {
   createVerificationCodeExpiry,
   isVerificationCodeExpired,
 } from '../utils/verification';
+import { apiLogin, apiCreateUser, apiVerifyEmail, apiResendVerification, apiRequestPasswordReset, apiResetPassword, checkBackend } from '../services/api';
+import { isSupabaseConfigured } from '../services/supabase';
+import * as supabaseDb from '../services/supabaseDatabase';
 
 const AuthContext = createContext(null);
 
@@ -125,10 +128,65 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const signUp = async (name, surname, email, password, photo, cardInfo = null) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('📝 Attempting signup via backend API for:', email);
+        console.log('📝 Signup data:', { 
+          name: name ? 'present' : 'missing', 
+          surname: surname ? 'present' : 'missing', 
+          email: email || 'missing', 
+          password: password ? `present (${password.length} chars)` : 'missing',
+          photo: photo ? 'present' : 'missing',
+          cardInfo: cardInfo ? 'present' : 'missing'
+        });
+        const result = await apiCreateUser({
+          name: name?.trim(),
+          surname: surname?.trim(),
+          email: email?.trim(),
+          password, // Already hashed before calling this
+          photo: photo || null,
+          cardInfo: cardInfo || null,
+        });
+        
+        // Backend returns { success: true, userId, verificationCode, user }
+        if (result && result.success && result.userId) {
+          // Backend signup successful
+          console.log('✅ Signup successful via backend');
+          return { 
+            success: true, 
+            verificationCode: result.verificationCode, // Backend returns code for demo
+            userId: result.userId
+          };
+        } else if (result && result.error) {
+          // Backend returned error (email already exists, etc.)
+          console.log('❌ Backend signup failed:', result.error);
+          return { success: false, error: result.error || 'Signup failed' };
+        } else {
+          // Unexpected response
+          console.warn('⚠️ Unexpected backend response, trying localStorage fallback');
+          // Fall through to localStorage
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend signup error:', error);
+        // Check if it's an "email already exists" error from the API
+        if (error.message && (error.message.includes('already registered') || error.message.includes('Email already'))) {
+          return { success: false, error: 'Email already registered' };
+        }
+        // If backend is available but signup failed, don't fall back to localStorage
+        // This ensures we always use the backend's current state
+        return { success: false, error: error.message || 'Signup failed. Please try again.' };
+      }
+    }
+
+    // Fallback to localStorage check (only if backend is not available)
+    console.log('📝 Attempting signup via localStorage for:', email);
     const users = await getUsersLocal();
 
-    // Check if user already exists
-    if (users.find((u) => u.email === email)) {
+    // Check if user already exists (case-insensitive)
+    const existingUser = users.find((u) => u.email && u.email.toLowerCase() === email.toLowerCase());
+    if (existingUser) {
       return { success: false, error: 'Email already registered' };
     }
 
@@ -163,6 +221,63 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
+    // Priority: Supabase > Backend API > localStorage
+    
+    // Try Supabase first
+    if (isSupabaseConfigured()) {
+      try {
+        console.log('🔐 Attempting login via Supabase for:', email);
+        const result = await supabaseDb.supabaseLogin(email, password);
+        
+        if (result && result.success && result.user) {
+          const userData = result.user;
+          setUser(userData);
+          localStorage.setItem('bloom_user', JSON.stringify(userData));
+          console.log('✅ Login successful via Supabase');
+          return { success: true };
+        } else if (result && result.needsVerification) {
+          console.log('⚠️ Login blocked: Email not verified');
+          return {
+            success: false,
+            error: result.error || 'Please verify your email address before logging in',
+            needsVerification: true,
+            userId: result.userId,
+            verificationCode: result.verificationCode,
+          };
+        } else if (result && result.error) {
+          console.log('❌ Supabase login failed:', result.error);
+          return { success: false, error: result.error || 'Login failed' };
+        }
+      } catch (error) {
+        console.warn('⚠️ Supabase login error:', error);
+        // Fall through to backend API
+      }
+    }
+    
+    // Try backend API
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('🔐 Attempting login via backend API for:', email);
+        const result = await apiLogin(email, password);
+        if (result.success && result.user) {
+          const userData = result.user;
+          setUser(userData);
+          localStorage.setItem('bloom_user', JSON.stringify(userData));
+          console.log('✅ Login successful via backend');
+          return { success: true };
+        } else {
+          console.log('❌ Backend login failed:', result.error);
+          return result;
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend login error:', error);
+        // Fall through to localStorage
+      }
+    }
+
+    // Fallback to localStorage check (for backward compatibility)
+    console.log('🔐 Attempting login via localStorage for:', email);
     const users = await getUsersLocal();
     const user = users.find((u) => u.email === email);
 
@@ -179,18 +294,20 @@ export const AuthProvider = ({ children }) => {
     if (!user.emailVerified) {
       return { 
         success: false, 
-        error: 'Please verify your email address before logging in. Check your email for the verification code.',
-        needsVerification: true 
+        error: 'Please verify your email address before logging in.',
+        needsVerification: true,
+        userId: user.id
       };
     }
 
     // Login successful
     const userData = { ...user };
-    delete userData.password; // Don't store password in user state
-    delete userData.verificationCode; // Don't store verification code in user state
-    delete userData.verificationCodeExpiry; // Don't store expiry in user state
+    delete userData.password;
+    delete userData.verificationCode;
+    delete userData.verificationCodeExpiry;
     setUser(userData);
     localStorage.setItem('bloom_user', JSON.stringify(userData));
+    console.log('✅ Login successful via localStorage');
 
     return { success: true };
   };
@@ -264,6 +381,35 @@ export const AuthProvider = ({ children }) => {
   };
 
   const verifyEmail = async (userId, code) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('✅ Verifying email via backend API for user:', userId);
+        const result = await apiVerifyEmail(userId, code);
+        if (result.success && result.user) {
+          // Verification successful via backend
+          const userData = result.user;
+          // Update state if this is the current user
+          if (user && user.id === userId) {
+            setUser(userData);
+            localStorage.setItem('bloom_user', JSON.stringify(userData));
+          }
+          console.log('✅ Email verified successfully via backend');
+          return { success: true };
+        } else {
+          // Backend returned error
+          console.log('❌ Backend verification failed:', result.error);
+          return { success: false, error: result.error || 'Verification failed' };
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend verification error, trying localStorage fallback:', error);
+        // Fall through to localStorage check
+      }
+    }
+
+    // Fallback to localStorage check (for backward compatibility)
+    console.log('✅ Verifying email via localStorage for user:', userId);
     const users = await getUsersLocal();
     const dbUser = users.find((u) => u.id === userId);
 
@@ -307,6 +453,30 @@ export const AuthProvider = ({ children }) => {
   };
 
   const resendVerificationCode = async (userId) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('✅ Resending verification code via backend API for user:', userId);
+        const result = await apiResendVerification(userId);
+        if (result.success) {
+          console.log('✅ Verification code resent successfully via backend');
+          return { 
+            success: true, 
+            verificationCode: result.verificationCode // Backend returns code for demo
+          };
+        } else {
+          console.log('❌ Backend resend failed:', result.error);
+          return { success: false, error: result.error || 'Failed to resend code' };
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend resend error, trying localStorage fallback:', error);
+        // Fall through to localStorage check
+      }
+    }
+
+    // Fallback to localStorage check (for backward compatibility)
+    console.log('✅ Resending verification code via localStorage for user:', userId);
     const users = await getUsersLocal();
     const user = users.find((u) => u.id === userId);
 
@@ -331,6 +501,168 @@ export const AuthProvider = ({ children }) => {
     return { success: true, verificationCode };
   };
 
+  const requestVerificationByEmail = async (email) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        // First, get the user by email to find their userId
+        const users = await getUsersLocal();
+        const user = users.find((u) => u.email && u.email.toLowerCase() === email.toLowerCase());
+        
+        if (!user) {
+          return { success: false, error: 'User not found' };
+        }
+
+        if (user.emailVerified) {
+          return { success: false, error: 'Email is already verified' };
+        }
+
+        console.log('✅ Requesting verification code via backend API for user:', user.id);
+        const result = await apiResendVerification(user.id);
+        if (result.success) {
+          console.log('✅ Verification code sent successfully via backend');
+          return { 
+            success: true, 
+            verificationCode: result.verificationCode,
+            userId: user.id
+          };
+        } else {
+          console.log('❌ Backend verification request failed:', result.error);
+          return { success: false, error: result.error || 'Failed to send verification code' };
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend verification request error, trying localStorage fallback:', error);
+        // Fall through to localStorage
+      }
+    }
+
+    // Fallback to localStorage
+    console.log('✅ Requesting verification code via localStorage for email:', email);
+    const users = await getUsersLocal();
+    const user = users.find((u) => u.email && u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (user.emailVerified) {
+      return { success: false, error: 'Email is already verified' };
+    }
+
+    // Generate new verification code
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpiry = createVerificationCodeExpiry();
+
+    // Update user with new code
+    await dbUpdateUser(user.id, {
+      verificationCode,
+      verificationCodeExpiry,
+    });
+
+    return { success: true, verificationCode, userId: user.id };
+  };
+
+  const requestPasswordReset = async (email) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('✅ Requesting password reset via backend API for:', email);
+        const result = await apiRequestPasswordReset(email);
+        if (result.success) {
+          console.log('✅ Password reset code sent successfully via backend');
+          return { 
+            success: true, 
+            resetCode: result.resetCode // Backend returns code for demo
+          };
+        } else {
+          console.log('❌ Backend password reset request failed:', result.error);
+          return { success: false, error: result.error || 'Failed to send reset code' };
+        }
+      } catch (error) {
+        console.error('⚠️ Backend password reset request error:', error);
+        const errorMessage = error.message || 'Failed to send reset code';
+        // Check if it's a network error
+        if (error.message && (error.message.includes('fetch') || error.message.includes('Network'))) {
+          return { success: false, error: 'Cannot connect to server. Please ensure the backend server is running.' };
+        }
+        return { success: false, error: errorMessage };
+      }
+    }
+
+    // Fallback to localStorage (for backward compatibility)
+    console.log('✅ Requesting password reset via localStorage for:', email);
+    const users = await getUsersLocal();
+    const user = users.find((u) => u.email && u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      // Don't reveal if email exists for security
+      return { success: true, resetCode: null };
+    }
+
+    // Generate reset code
+    const resetCode = generateVerificationCode();
+    const passwordResetCodeExpiry = createVerificationCodeExpiry();
+
+    // Update user with reset code
+    await dbUpdateUser(user.id, {
+      passwordResetCode: resetCode,
+      passwordResetCodeExpiry: passwordResetCodeExpiry,
+    });
+
+    return { success: true, resetCode };
+  };
+
+  const resetPassword = async (email, code, newPassword) => {
+    // Try backend API first if available
+    const backendAvailable = await checkBackend();
+    if (backendAvailable) {
+      try {
+        console.log('✅ Resetting password via backend API for:', email);
+        const result = await apiResetPassword(email, code, newPassword);
+        if (result.success) {
+          console.log('✅ Password reset successful via backend');
+          return { success: true };
+        } else {
+          console.log('❌ Backend password reset failed:', result.error);
+          return { success: false, error: result.error || 'Failed to reset password' };
+        }
+      } catch (error) {
+        console.warn('⚠️ Backend password reset error:', error);
+        return { success: false, error: error.message || 'Failed to reset password' };
+      }
+    }
+
+    // Fallback to localStorage (for backward compatibility)
+    console.log('✅ Resetting password via localStorage for:', email);
+    const users = await getUsersLocal();
+    const user = users.find((u) => u.email && u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    // Check reset code
+    if (!user.passwordResetCode || user.passwordResetCode !== code) {
+      return { success: false, error: 'Invalid reset code' };
+    }
+
+    // Check expiry
+    if (!user.passwordResetCodeExpiry || isVerificationCodeExpired(user.passwordResetCodeExpiry)) {
+      return { success: false, error: 'Reset code has expired. Please request a new one.' };
+    }
+
+    // Update password
+    await dbUpdateUser(user.id, {
+      password: newPassword,
+      passwordResetCode: null,
+      passwordResetCodeExpiry: null,
+    });
+
+    return { success: true };
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -345,6 +677,9 @@ export const AuthProvider = ({ children }) => {
         setRememberMe,
         verifyEmail,
         resendVerificationCode,
+        requestVerificationByEmail,
+        requestPasswordReset,
+        resetPassword,
       }}
     >
       {children}

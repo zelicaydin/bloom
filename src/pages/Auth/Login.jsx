@@ -3,9 +3,10 @@ import { useAuth } from "../../store/AuthContext";
 import { validateEmail } from "../../utils/validation";
 import { hashPasswordAsync } from "../../utils/hash";
 import RememberMeModal from "../../components/ui/RememberMeModal";
+import EmailVerificationModal from "../../components/ui/EmailVerificationModal";
 
 const Login = ({ navigate }) => {
-  const { login, setRememberMe } = useAuth();
+  const { login, setRememberMe, requestVerificationByEmail } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -13,6 +14,8 @@ const Login = ({ navigate }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [showRememberModal, setShowRememberModal] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationData, setVerificationData] = useState(null);
 
   // Clear errors when user types
   useEffect(() => {
@@ -55,9 +58,23 @@ const Login = ({ navigate }) => {
       } else {
         // Show clear error message, especially for unverified emails
         if (result.needsVerification) {
-          setSubmitError(
-            "Please verify your email address before logging in. Check your email for the verification code, or sign up again to receive a new code."
-          );
+          // Request verification code and show modal
+          try {
+            const verificationResult = await requestVerificationByEmail(email);
+            if (verificationResult.success) {
+              setVerificationData({
+                userId: verificationResult.userId || result.userId,
+                email: email,
+                verificationCode: verificationResult.verificationCode,
+              });
+              setShowVerificationModal(true);
+              setSubmitError(""); // Clear error since we're showing the modal
+            } else {
+              setSubmitError(verificationResult.error || "Failed to send verification code. Please try again.");
+            }
+          } catch (error) {
+            setSubmitError("Failed to request verification code. Please try again.");
+          }
         } else {
           setSubmitError(result.error || "Login failed");
         }
@@ -66,6 +83,22 @@ const Login = ({ navigate }) => {
       setSubmitError("An error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleEmailVerified = async () => {
+    // After email is verified, automatically log the user in
+    try {
+      const hashedPassword = await hashPasswordAsync(password);
+      const result = await login(email, hashedPassword);
+      if (result.success) {
+        setShowVerificationModal(false);
+        setShowRememberModal(true);
+      } else {
+        setSubmitError(result.error || "Login failed after verification");
+      }
+    } catch (error) {
+      setSubmitError("An error occurred. Please try logging in again.");
     }
   };
 
@@ -81,6 +114,19 @@ const Login = ({ navigate }) => {
             setRememberMe(false);
             navigate("/");
           }}
+        />
+      )}
+      {showVerificationModal && verificationData && (
+        <EmailVerificationModal
+          userId={verificationData.userId}
+          email={verificationData.email}
+          verificationCode={verificationData.verificationCode}
+          onVerified={handleEmailVerified}
+          onClose={() => {
+            setShowVerificationModal(false);
+            setVerificationData(null);
+          }}
+          navigate={navigate}
         />
       )}
       <section style={styles.container}>
@@ -148,6 +194,15 @@ const Login = ({ navigate }) => {
             {errors.password && (
               <span style={styles.errorText}>{errors.password}</span>
             )}
+            <div style={styles.forgotPassword}>
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                style={styles.forgotPasswordLink}
+              >
+                Forgot Password?
+              </button>
+            </div>
           </div>
 
           <button
@@ -283,6 +338,20 @@ const styles = {
     color: "#fff",
     cursor: "pointer",
     textDecoration: "underline",
+  },
+  forgotPassword: {
+    marginTop: "8px",
+    textAlign: "right",
+  },
+  forgotPasswordLink: {
+    background: "transparent",
+    border: "none",
+    color: "rgba(255,255,255,0.6)",
+    cursor: "pointer",
+    fontSize: "0.9rem",
+    textDecoration: "underline",
+    padding: 0,
+    transition: "color 0.2s",
   },
 };
 

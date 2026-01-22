@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import "./styles/index.css";
@@ -13,6 +13,16 @@ import { NotificationProvider } from "./store/NotificationContext";
 import { ProductsProvider } from "./store/ProductsContext";
 import { SubscriptionProvider } from "./store/SubscriptionContext";
 import { ReviewsProvider } from "./store/ReviewsContext";
+import { initializeBackend } from "./utils/initializeBackend";
+
+// Initialize backend on app startup
+const AppWithBackendInit = () => {
+  useEffect(() => {
+    initializeBackend();
+  }, []);
+
+  return <App />;
+};
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -22,7 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <CartProvider>
             <SubscriptionProvider>
               <ReviewsProvider>
-                <App />
+                <AppWithBackendInit />
               </ReviewsProvider>
             </SubscriptionProvider>
           </CartProvider>

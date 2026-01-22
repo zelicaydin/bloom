@@ -33,9 +33,16 @@ const Admin = ({ navigate }) => {
   const [couponExpiresAt, setCouponExpiresAt] = useState('');
   const [userCoupons, setUserCoupons] = useState([]);
 
-  // Load users
+  // Load users on mount and refresh periodically
   useEffect(() => {
     loadUsers();
+    
+    // Refresh users every 2 seconds to catch new signups
+    const interval = setInterval(() => {
+      loadUsers();
+    }, 2000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   // Load user coupons when selected user changes
@@ -111,14 +118,16 @@ const Admin = ({ navigate }) => {
     const { getUsers } = await import('../../services/database');
     try {
       const parsed = await getUsers();
+      console.log('📊 Loaded users from backend:', parsed.length);
       // Don't show password in the list
       const usersWithoutPasswords = parsed.map((u) => {
-        const { password, ...userWithoutPassword } = u;
+        const { password, verificationCode, verificationCodeExpiry, ...userWithoutPassword } = u;
         return userWithoutPassword;
       });
       setUsers(usersWithoutPasswords);
     } catch (e) {
-      console.error('Error loading users:', e);
+      console.error('❌ Error loading users:', e);
+      setUsers([]);
     }
   };
 
@@ -341,6 +350,33 @@ const Admin = ({ navigate }) => {
         {activeTab === 'users' ? (
           <>
             <div style={styles.gridSection}>
+              {/* Header with refresh button */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h1 style={{ fontSize: '2rem', fontWeight: 600, color: '#fff', margin: 0 }}>User Management</h1>
+                <button
+                  onClick={loadUsers}
+                  style={{
+                    background: 'rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: '#fff',
+                    padding: '10px 20px',
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    borderRadius: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  Refresh
+                </button>
+              </div>
+              
               {/* Admins Section */}
               <div style={styles.userCategorySection}>
                 <h2 style={styles.sectionTitle}>

@@ -39,8 +39,8 @@ const Product = ({ path, navigate }) => {
   useEffect(() => {
     if (!product) return;
 
-    const loadReviews = () => {
-      const productReviews = getProductReviews(product.id);
+    const loadReviews = async () => {
+      const productReviews = await getProductReviews(product.id);
       setReviews(productReviews);
 
       // Calculate average rating from actual reviews
